@@ -51,6 +51,7 @@ class ThreadOptions:
         model_reasoning_effort: Model reasoning effort preset.
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_enabled: Enable/disable web search feature.
+        skills_enabled: Enable/disable skills discovery and injection.
         approval_policy: Approval policy for tool execution.
         additional_directories: Additional directories to add to the sandbox.
     """
@@ -75,6 +76,9 @@ class ThreadOptions:
 
     # Enable/disable web search feature
     web_search_enabled: Optional[bool] = None
+
+    # Enable/disable skills discovery and injection
+    skills_enabled: Optional[bool] = None
 
     # Approval policy for tool execution
     approval_policy: Optional[ApprovalMode] = None

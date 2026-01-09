@@ -280,6 +280,7 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         model_reasoning_effort="high",
         network_access_enabled=True,
         web_search_enabled=False,
+        skills_enabled=True,
         approval_policy="on-request",
         additional_directories=["../backend", "/tmp/shared"],
         images=["/tmp/one.png", "/tmp/two.jpg"],
@@ -294,6 +295,7 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert 'model_reasoning_effort="high"' in cmd_list
     assert "sandbox_workspace_write.network_access=true" in cmd_list
     assert "features.web_search_request=false" in cmd_list
+    assert "features.skills=true" in cmd_list
     assert 'approval_policy="on-request"' in cmd_list
 
     add_dir_values = [

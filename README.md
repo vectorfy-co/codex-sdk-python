@@ -155,6 +155,7 @@ ThreadOptions(
     model_reasoning_effort="high",
     network_access_enabled=True,
     web_search_enabled=False,
+    skills_enabled=True,
     approval_policy="on-request",
     additional_directories=["../shared"],
 )
@@ -168,6 +169,7 @@ Important mappings to the Codex CLI:
 - `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
 - `network_access_enabled` maps to `--config sandbox_workspace_write.network_access=...`.
 - `web_search_enabled` maps to `--config features.web_search_request=...`.
+- `skills_enabled` maps to `--config features.skills=...`.
 - `approval_policy` maps to `--config approval_policy=...`.
 
 ### TurnOptions (per turn)

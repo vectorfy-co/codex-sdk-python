@@ -276,6 +276,7 @@ class Thread:
                     model_reasoning_effort=self._thread_options.model_reasoning_effort,
                     network_access_enabled=self._thread_options.network_access_enabled,
                     web_search_enabled=self._thread_options.web_search_enabled,
+                    skills_enabled=self._thread_options.skills_enabled,
                     approval_policy=self._thread_options.approval_policy,
                     signal=turn_options.signal,
                 )

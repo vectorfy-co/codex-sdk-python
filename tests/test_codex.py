@@ -279,6 +279,7 @@ class TestOptions:
             model_reasoning_effort="high",
             network_access_enabled=True,
             web_search_enabled=False,
+            skills_enabled=True,
             approval_policy="on-request",
             additional_directories=["../backend"],
         )
@@ -290,6 +291,7 @@ class TestOptions:
         assert options.model_reasoning_effort == "high"
         assert options.network_access_enabled is True
         assert options.web_search_enabled is False
+        assert options.skills_enabled is True
         assert options.approval_policy == "on-request"
         assert options.additional_directories == ["../backend"]
 

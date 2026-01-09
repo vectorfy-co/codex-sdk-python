@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, List, Literal, Optional, Union
 
 # The status of a command execution
-CommandExecutionStatus = Literal["in_progress", "completed", "failed"]
+CommandExecutionStatus = Literal["in_progress", "completed", "failed", "declined"]
 
 # Indicates the type of the file change
 PatchChangeKind = Literal["add", "delete", "update"]

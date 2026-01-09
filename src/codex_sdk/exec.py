@@ -52,6 +52,7 @@ class CodexExecArgs:
     model_reasoning_effort: Optional[ModelReasoningEffort] = None
     network_access_enabled: Optional[bool] = None
     web_search_enabled: Optional[bool] = None
+    skills_enabled: Optional[bool] = None
     approval_policy: Optional[ApprovalMode] = None
     signal: Optional[AbortSignal] = None
 
@@ -179,6 +180,10 @@ class CodexExec:
         if args.web_search_enabled is not None:
             enabled = "true" if args.web_search_enabled else "false"
             command_args.extend(["--config", f"features.web_search_request={enabled}"])
+
+        if args.skills_enabled is not None:
+            enabled = "true" if args.skills_enabled else "false"
+            command_args.extend(["--config", f"features.skills={enabled}"])
 
         if args.approval_policy:
             command_args.extend(
