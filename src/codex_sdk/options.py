@@ -51,7 +51,15 @@ class ThreadOptions:
         model_reasoning_effort: Model reasoning effort preset.
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_enabled: Enable/disable web search feature.
+        web_search_cached_enabled: Enable/disable cached web search feature.
         skills_enabled: Enable/disable skills discovery and injection.
+        shell_snapshot_enabled: Enable/disable shell snapshotting.
+        background_terminals_enabled: Enable/disable background terminals (unified exec).
+        apply_patch_freeform_enabled: Enable/disable freeform apply_patch tool.
+        exec_policy_enabled: Enable/disable exec policy enforcement.
+        remote_models_enabled: Enable/disable remote model list refresh.
+        request_compression_enabled: Enable/disable request body compression.
+        feature_overrides: Arbitrary feature flag overrides (key -> bool).
         approval_policy: Approval policy for tool execution.
         additional_directories: Additional directories to add to the sandbox.
     """
@@ -77,8 +85,32 @@ class ThreadOptions:
     # Enable/disable web search feature
     web_search_enabled: Optional[bool] = None
 
+    # Enable/disable cached web search feature
+    web_search_cached_enabled: Optional[bool] = None
+
     # Enable/disable skills discovery and injection
     skills_enabled: Optional[bool] = None
+
+    # Enable/disable shell snapshotting
+    shell_snapshot_enabled: Optional[bool] = None
+
+    # Enable/disable background terminals (unified exec)
+    background_terminals_enabled: Optional[bool] = None
+
+    # Enable/disable freeform apply_patch tool
+    apply_patch_freeform_enabled: Optional[bool] = None
+
+    # Enable/disable exec policy enforcement
+    exec_policy_enabled: Optional[bool] = None
+
+    # Enable/disable remote model list refresh
+    remote_models_enabled: Optional[bool] = None
+
+    # Enable/disable request body compression
+    request_compression_enabled: Optional[bool] = None
+
+    # Arbitrary feature flag overrides (feature key -> bool)
+    feature_overrides: Optional[Mapping[str, bool]] = None
 
     # Approval policy for tool execution
     approval_policy: Optional[ApprovalMode] = None

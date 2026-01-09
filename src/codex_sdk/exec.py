@@ -52,7 +52,15 @@ class CodexExecArgs:
     model_reasoning_effort: Optional[ModelReasoningEffort] = None
     network_access_enabled: Optional[bool] = None
     web_search_enabled: Optional[bool] = None
+    web_search_cached_enabled: Optional[bool] = None
     skills_enabled: Optional[bool] = None
+    shell_snapshot_enabled: Optional[bool] = None
+    background_terminals_enabled: Optional[bool] = None
+    apply_patch_freeform_enabled: Optional[bool] = None
+    exec_policy_enabled: Optional[bool] = None
+    remote_models_enabled: Optional[bool] = None
+    request_compression_enabled: Optional[bool] = None
+    feature_overrides: Optional[Mapping[str, bool]] = None
     approval_policy: Optional[ApprovalMode] = None
     signal: Optional[AbortSignal] = None
 
@@ -171,6 +179,17 @@ class CodexExec:
                 ["--config", f'model_reasoning_effort="{args.model_reasoning_effort}"']
             )
 
+        if args.feature_overrides:
+            for key in sorted(args.feature_overrides):
+                enabled = args.feature_overrides[key]
+                if not isinstance(enabled, bool):
+                    raise CodexError(
+                        f"feature_overrides[{key!r}] must be a bool, got {type(enabled).__name__}"
+                    )
+                config_key = key if key.startswith("features.") else f"features.{key}"
+                value = "true" if enabled else "false"
+                command_args.extend(["--config", f"{config_key}={value}"])
+
         if args.network_access_enabled is not None:
             enabled = "true" if args.network_access_enabled else "false"
             command_args.extend(
@@ -181,9 +200,39 @@ class CodexExec:
             enabled = "true" if args.web_search_enabled else "false"
             command_args.extend(["--config", f"features.web_search_request={enabled}"])
 
+        if args.web_search_cached_enabled is not None:
+            enabled = "true" if args.web_search_cached_enabled else "false"
+            command_args.extend(["--config", f"features.web_search_cached={enabled}"])
+
         if args.skills_enabled is not None:
             enabled = "true" if args.skills_enabled else "false"
             command_args.extend(["--config", f"features.skills={enabled}"])
+
+        if args.shell_snapshot_enabled is not None:
+            enabled = "true" if args.shell_snapshot_enabled else "false"
+            command_args.extend(["--config", f"features.shell_snapshot={enabled}"])
+
+        if args.background_terminals_enabled is not None:
+            enabled = "true" if args.background_terminals_enabled else "false"
+            command_args.extend(["--config", f"features.unified_exec={enabled}"])
+
+        if args.apply_patch_freeform_enabled is not None:
+            enabled = "true" if args.apply_patch_freeform_enabled else "false"
+            command_args.extend(["--config", f"features.apply_patch_freeform={enabled}"])
+
+        if args.exec_policy_enabled is not None:
+            enabled = "true" if args.exec_policy_enabled else "false"
+            command_args.extend(["--config", f"features.exec_policy={enabled}"])
+
+        if args.remote_models_enabled is not None:
+            enabled = "true" if args.remote_models_enabled else "false"
+            command_args.extend(["--config", f"features.remote_models={enabled}"])
+
+        if args.request_compression_enabled is not None:
+            enabled = "true" if args.request_compression_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.enable_request_compression={enabled}"]
+            )
 
         if args.approval_policy:
             command_args.extend(

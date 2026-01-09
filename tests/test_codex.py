@@ -279,7 +279,15 @@ class TestOptions:
             model_reasoning_effort="high",
             network_access_enabled=True,
             web_search_enabled=False,
+            web_search_cached_enabled=True,
             skills_enabled=True,
+            shell_snapshot_enabled=True,
+            background_terminals_enabled=True,
+            apply_patch_freeform_enabled=True,
+            exec_policy_enabled=False,
+            remote_models_enabled=True,
+            request_compression_enabled=True,
+            feature_overrides={"web_search_cached": False},
             approval_policy="on-request",
             additional_directories=["../backend"],
         )
@@ -291,7 +299,15 @@ class TestOptions:
         assert options.model_reasoning_effort == "high"
         assert options.network_access_enabled is True
         assert options.web_search_enabled is False
+        assert options.web_search_cached_enabled is True
         assert options.skills_enabled is True
+        assert options.shell_snapshot_enabled is True
+        assert options.background_terminals_enabled is True
+        assert options.apply_patch_freeform_enabled is True
+        assert options.exec_policy_enabled is False
+        assert options.remote_models_enabled is True
+        assert options.request_compression_enabled is True
+        assert options.feature_overrides == {"web_search_cached": False}
         assert options.approval_policy == "on-request"
         assert options.additional_directories == ["../backend"]
 

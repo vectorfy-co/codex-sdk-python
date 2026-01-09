@@ -155,7 +155,14 @@ ThreadOptions(
     model_reasoning_effort="high",
     network_access_enabled=True,
     web_search_enabled=False,
+    web_search_cached_enabled=False,
     skills_enabled=True,
+    shell_snapshot_enabled=True,
+    background_terminals_enabled=True,
+    apply_patch_freeform_enabled=False,
+    exec_policy_enabled=True,
+    remote_models_enabled=False,
+    request_compression_enabled=True,
     approval_policy="on-request",
     additional_directories=["../shared"],
 )
@@ -169,8 +176,27 @@ Important mappings to the Codex CLI:
 - `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
 - `network_access_enabled` maps to `--config sandbox_workspace_write.network_access=...`.
 - `web_search_enabled` maps to `--config features.web_search_request=...`.
+- `web_search_cached_enabled` maps to `--config features.web_search_cached=...`.
 - `skills_enabled` maps to `--config features.skills=...`.
+- `shell_snapshot_enabled` maps to `--config features.shell_snapshot=...`.
+- `background_terminals_enabled` maps to `--config features.unified_exec=...`.
+- `apply_patch_freeform_enabled` maps to `--config features.apply_patch_freeform=...`.
+- `exec_policy_enabled` maps to `--config features.exec_policy=...`.
+- `remote_models_enabled` maps to `--config features.remote_models=...`.
+- `request_compression_enabled` maps to `--config features.enable_request_compression=...`.
+- `feature_overrides` maps to `--config features.<key>=...` (explicit options take precedence).
 - `approval_policy` maps to `--config approval_policy=...`.
+
+Feature overrides example:
+
+```python
+ThreadOptions(
+    feature_overrides={
+        "web_search_cached": True,
+        "powershell_utf8": True,
+    }
+)
+```
 
 ### TurnOptions (per turn)
 

@@ -280,7 +280,14 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         model_reasoning_effort="high",
         network_access_enabled=True,
         web_search_enabled=False,
+        web_search_cached_enabled=True,
         skills_enabled=True,
+        shell_snapshot_enabled=True,
+        background_terminals_enabled=False,
+        apply_patch_freeform_enabled=True,
+        exec_policy_enabled=False,
+        remote_models_enabled=True,
+        request_compression_enabled=False,
         approval_policy="on-request",
         additional_directories=["../backend", "/tmp/shared"],
         images=["/tmp/one.png", "/tmp/two.jpg"],
@@ -295,7 +302,14 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert 'model_reasoning_effort="high"' in cmd_list
     assert "sandbox_workspace_write.network_access=true" in cmd_list
     assert "features.web_search_request=false" in cmd_list
+    assert "features.web_search_cached=true" in cmd_list
     assert "features.skills=true" in cmd_list
+    assert "features.shell_snapshot=true" in cmd_list
+    assert "features.unified_exec=false" in cmd_list
+    assert "features.apply_patch_freeform=true" in cmd_list
+    assert "features.exec_policy=false" in cmd_list
+    assert "features.remote_models=true" in cmd_list
+    assert "features.enable_request_compression=false" in cmd_list
     assert 'approval_policy="on-request"' in cmd_list
 
     add_dir_values = [
@@ -307,6 +321,69 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         cmd_list[i + 1] for i, v in enumerate(cmd_list[:-1]) if v == "--image"
     ]
     assert image_values == ["/tmp/one.png", "/tmp/two.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_exec_omits_optional_feature_flags_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: Dict[str, Any] = {}
+
+    async def fake_spawn(*cmd: Any, **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = list(cmd)
+        return FakeProcess([], [], 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello")
+
+    async for _ in exec.run(args):
+        pass
+
+    cmd_list = captured["cmd"]
+    assert all(
+        "features.skills" not in arg
+        and "features.shell_snapshot" not in arg
+        and "features.unified_exec" not in arg
+        and "features.web_search_request" not in arg
+        and "features.web_search_cached" not in arg
+        and "features.apply_patch_freeform" not in arg
+        and "features.exec_policy" not in arg
+        and "features.remote_models" not in arg
+        and "features.enable_request_compression" not in arg
+        for arg in cmd_list
+        if isinstance(arg, str)
+    )
+
+
+@pytest.mark.asyncio
+async def test_exec_applies_feature_overrides(monkeypatch: pytest.MonkeyPatch):
+    captured: Dict[str, Any] = {}
+
+    async def fake_spawn(*cmd: Any, **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = list(cmd)
+        return FakeProcess([], [], 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(
+        input="hello",
+        feature_overrides={"web_search_cached": True, "powershell_utf8": True},
+        web_search_cached_enabled=False,
+    )
+
+    async for _ in exec.run(args):
+        pass
+
+    cmd_list = captured["cmd"]
+    override_key = "features.web_search_cached=true"
+    explicit_key = "features.web_search_cached=false"
+    assert "features.powershell_utf8=true" in cmd_list
+    assert override_key in cmd_list
+    assert explicit_key in cmd_list
+    assert cmd_list.index(override_key) < cmd_list.index(explicit_key)
 
 
 @pytest.mark.asyncio
