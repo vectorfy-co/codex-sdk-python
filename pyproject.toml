@@ -1,0 +1,120 @@
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "codex-sdk-python"
+version = "0.0.0.dev0"
+description = "Python SDK for Codex APIs"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "OpenAI", email = "support@openai.com"}
+]
+keywords = ["openai", "codex", "sdk", "python", "api"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+pydantic = [
+    "pydantic>=2",
+]
+pydantic-ai = [
+    "pydantic-ai; python_version >= '3.10'",
+]
+logfire = [
+    "logfire",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0",
+    "black>=22.0",
+    "isort>=5.0",
+    "mypy>=1.0",
+    "flake8>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/andreamaspero/codex-sdk-python"
+Repository = "https://github.com/andreamaspero/codex-sdk-python"
+Documentation = "https://github.com/andreamaspero/codex-sdk-python"
+
+[tool.uv.build-backend]
+module-name = "codex_sdk"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["codex_sdk"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["pydantic_ai", "pydantic_ai.*", "mcp", "mcp.*", "logfire", "logfire.*"]
+follow_imports = "skip"
+ignore_errors = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+branch = true
+source = ["codex_sdk"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 95

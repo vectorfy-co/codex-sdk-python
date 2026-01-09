@@ -1,0 +1,9 @@
+[flake8]
+# The SDK uses Black for formatting (line length 88) and we don't want lint to
+# fight formatting, especially in examples and generated strings.
+max-line-length = 88
+extend-ignore = E501,E203
+
+# Tests may use conditional imports (e.g. pytest.importorskip) which triggers E402.
+per-file-ignores =
+    tests/*.py:E402
