@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.80.0)"
+        required: false
+      prerelease:
+        description: "Mark as prerelease"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: resolve
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract changelog section
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          tag = os.environ["TAG"]
+          version = tag[1:] if tag.startswith("v") else tag
+          path = "CHANGELOG_SDK.md"
+          with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+
+          header_pattern = re.compile(rf"^##\\s+{re.escape(version)}\\b.*$", re.MULTILINE)
+          match = header_pattern.search(text)
+          if not match:
+            print(f"::error::Version {version} not found in {path}")
+            sys.exit(1)
+
+          start = match.start()
+          remainder = text[match.end():]
+          next_header = re.search(r"^##\\s+\\S+", remainder, re.MULTILINE)
+          end = match.end() + (next_header.start() if next_header else len(remainder))
+          body = text[start:end].strip()
+
+          with open("release_notes.md", "w", encoding="utf-8") as handle:
+            handle.write(body + "\n")
+          PY
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve.outputs.tag }}
+          name: ${{ steps.resolve.outputs.tag }}
+          body_path: release_notes.md
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}

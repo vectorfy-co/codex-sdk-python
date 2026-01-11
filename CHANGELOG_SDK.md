@@ -19,6 +19,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - App-server error type (`CodexAppServerError`).
 - Pytest `conftest.py` to make `uv run pytest` work without extra PYTHONPATH setup.
 - Added `UPGRADE_CHECKLIST.md` to guide future release updates.
+- GitHub Actions release workflow that creates GitHub releases from `CHANGELOG_SDK.md`.
 
 ### Updated
 - Bundled Codex CLI vendor binaries updated to 0.80.0 via `scripts/setup_binary.py`.
