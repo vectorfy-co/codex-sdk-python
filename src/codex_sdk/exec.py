@@ -25,6 +25,7 @@ from typing import (
 )
 
 from .abort import AbortSignal
+from .config_overrides import encode_config_overrides
 from .exceptions import CodexAbortError, CodexCLIError, CodexError
 from .options import ApprovalMode, ModelReasoningEffort, SandboxMode
 from .telemetry import span
@@ -63,6 +64,7 @@ class CodexExecArgs:
     feature_overrides: Optional[Mapping[str, bool]] = None
     approval_policy: Optional[ApprovalMode] = None
     signal: Optional[AbortSignal] = None
+    config_overrides: Optional[Mapping[str, Any]] = None
 
 
 class CodexExec:
@@ -161,6 +163,10 @@ class CodexExec:
         if args.sandbox_mode:
             command_args.extend(["--sandbox", args.sandbox_mode])
 
+        if args.config_overrides:
+            for override in encode_config_overrides(args.config_overrides):
+                command_args.extend(["--config", override])
+
         if args.working_directory:
             command_args.extend(["--cd", args.working_directory])
 
@@ -203,10 +209,6 @@ class CodexExec:
         if args.web_search_cached_enabled is not None:
             enabled = "true" if args.web_search_cached_enabled else "false"
             command_args.extend(["--config", f"features.web_search_cached={enabled}"])
-
-        if args.skills_enabled is not None:
-            enabled = "true" if args.skills_enabled else "false"
-            command_args.extend(["--config", f"features.skills={enabled}"])
 
         if args.shell_snapshot_enabled is not None:
             enabled = "true" if args.shell_snapshot_enabled else "false"

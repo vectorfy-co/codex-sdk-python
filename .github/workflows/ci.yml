@@ -17,7 +17,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --all-extras --dev
 
       - name: Lint
         run: |
@@ -45,7 +45,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --all-extras --dev
 
       - name: Test
-        run: uv run pytest --cov=codex_sdk
+        run: uv run pytest --cov=codex_sdk --cov-report=term-missing

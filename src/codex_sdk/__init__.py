@@ -6,6 +6,17 @@ Embed the Codex agent in your Python workflows and applications.
 
 from .abort import AbortController, AbortSignal
 from .codex import Codex
+from .app_server import (
+    AppServerClient,
+    AppServerClientInfo,
+    AppServerNotification,
+    AppServerRequest,
+    AppServerOptions,
+    AppServerTurnSession,
+    ApprovalDecisions,
+    AppServerInput,
+    AppServerUserInput,
+)
 from .events import (
     ItemCompletedEvent,
     ItemStartedEvent,
@@ -21,6 +32,7 @@ from .events import (
 )
 from .exceptions import (
     CodexAbortError,
+    CodexAppServerError,
     CodexCLIError,
     CodexError,
     CodexParseError,
@@ -44,6 +56,7 @@ from .items import (
     TodoListItem,
     WebSearchItem,
 )
+from .hooks import ThreadHooks
 from .options import (
     ApprovalMode,
     CodexOptions,
@@ -62,13 +75,23 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.0.0-dev"
+__version__ = "0.80.0"
 
 __all__ = [
     "AbortController",
     "AbortSignal",
     "Codex",
+    "AppServerClient",
+    "AppServerClientInfo",
+    "AppServerNotification",
+    "AppServerRequest",
+    "AppServerOptions",
+    "AppServerTurnSession",
+    "ApprovalDecisions",
+    "AppServerInput",
+    "AppServerUserInput",
     "Thread",
+    "ThreadHooks",
     "Input",
     "TextInput",
     "LocalImageInput",
@@ -110,6 +133,7 @@ __all__ = [
     "ModelReasoningEffort",
     "CodexError",
     "CodexAbortError",
+    "CodexAppServerError",
     "CodexCLIError",
     "CodexParseError",
     "TurnFailedError",

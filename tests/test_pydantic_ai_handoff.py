@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import pytest
+
+pytest.importorskip("pydantic_ai")
 from pydantic_ai.tools import Tool
 
 from codex_sdk.events import Usage

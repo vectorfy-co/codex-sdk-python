@@ -24,6 +24,8 @@ class CodexOptions:
         api_key: API key for authentication (sets CODEX_API_KEY for the child process).
         env: Environment variables passed to the Codex CLI process. When provided, the SDK
             will not inherit variables from os.environ.
+        config_overrides: Optional config overrides passed as `--config key=value` to the Codex
+            CLI. Values are encoded as TOML literals; for complex overrides, use strings.
     """
 
     # Override the path to the codex binary
@@ -37,6 +39,9 @@ class CodexOptions:
 
     # Environment variables passed to the Codex CLI process.
     env: Optional[Mapping[str, str]] = None
+
+    # Optional config overrides passed to the Codex CLI process.
+    config_overrides: Optional[Mapping[str, Any]] = None
 
 
 @dataclass
@@ -52,7 +57,7 @@ class ThreadOptions:
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_enabled: Enable/disable web search feature.
         web_search_cached_enabled: Enable/disable cached web search feature.
-        skills_enabled: Enable/disable skills discovery and injection.
+        skills_enabled: (Deprecated) Skills are always enabled in Codex 0.80+.
         shell_snapshot_enabled: Enable/disable shell snapshotting.
         background_terminals_enabled: Enable/disable background terminals (unified exec).
         apply_patch_freeform_enabled: Enable/disable freeform apply_patch tool.
@@ -62,6 +67,8 @@ class ThreadOptions:
         feature_overrides: Arbitrary feature flag overrides (key -> bool).
         approval_policy: Approval policy for tool execution.
         additional_directories: Additional directories to add to the sandbox.
+        config_overrides: Optional config overrides passed as `--config key=value` for this
+            thread's invocations. Values are encoded as TOML literals.
     """
 
     # Model to use for the thread
@@ -88,7 +95,7 @@ class ThreadOptions:
     # Enable/disable cached web search feature
     web_search_cached_enabled: Optional[bool] = None
 
-    # Enable/disable skills discovery and injection
+    # (Deprecated) Skills are always enabled in Codex 0.80+
     skills_enabled: Optional[bool] = None
 
     # Enable/disable shell snapshotting
@@ -117,6 +124,9 @@ class ThreadOptions:
 
     # Additional directories to add to the sandbox
     additional_directories: Optional[List[str]] = None
+
+    # Optional config overrides passed to the Codex CLI process.
+    config_overrides: Optional[Mapping[str, Any]] = None
 
 
 @dataclass

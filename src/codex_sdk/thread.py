@@ -23,6 +23,8 @@ from typing import (
 from .events import ThreadError, ThreadEvent, Usage
 from .exceptions import CodexError, CodexParseError, TurnFailedError
 from .exec import CodexExec, CodexExecArgs, create_output_schema_file
+from .config_overrides import merge_config_overrides
+from .hooks import ThreadHooks, dispatch_event
 from .items import (
     AgentMessageItem,
     CommandExecutionItem,
@@ -286,6 +288,10 @@ class Thread:
                     request_compression_enabled=self._thread_options.request_compression_enabled,
                     feature_overrides=self._thread_options.feature_overrides,
                     approval_policy=self._thread_options.approval_policy,
+                    config_overrides=merge_config_overrides(
+                        self._options.config_overrides,
+                        self._thread_options.config_overrides,
+                    ),
                     signal=turn_options.signal,
                 )
 
@@ -466,6 +472,49 @@ class Thread:
         turn_failure: Optional[ThreadError] = None
 
         async for event in self._run_streamed_internal(input, turn_options):
+            if event.type == "item.completed":
+                if event.item.type == "agent_message":
+                    final_response = event.item.text
+                items.append(event.item)
+            elif event.type == "turn.completed":
+                usage = event.usage
+            elif event.type == "turn.failed":
+                turn_failure = event.error
+                break
+
+        if turn_failure:
+            raise TurnFailedError(turn_failure.message, error=turn_failure)
+
+        return Turn(items=items, final_response=final_response, usage=usage)
+
+    async def run_with_hooks(
+        self,
+        input: Input,
+        *,
+        hooks: ThreadHooks,
+        turn_options: Optional[TurnOptions] = None,
+    ) -> Turn:
+        """
+        Run a turn while dispatching streamed events to hooks.
+
+        Args:
+            input: Input prompt to send to the agent.
+            hooks: Hook callbacks invoked for streamed events.
+            turn_options: Optional turn configuration.
+
+        Returns:
+            The completed turn containing items, the final agent message, and usage data.
+        """
+        if turn_options is None:
+            turn_options = TurnOptions()
+
+        items: List[ThreadItem] = []
+        final_response: str = ""
+        usage: Optional[Usage] = None
+        turn_failure: Optional[ThreadError] = None
+
+        async for event in self._run_streamed_internal(input, turn_options):
+            await dispatch_event(hooks, event)
             if event.type == "item.completed":
                 if event.item.type == "agent_message":
                     final_response = event.item.text

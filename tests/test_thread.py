@@ -2,7 +2,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
-from pydantic import BaseModel
+
+pydantic = pytest.importorskip("pydantic")
+BaseModel = pydantic.BaseModel
 
 from codex_sdk import CodexOptions, ThreadOptions
 from codex_sdk.events import Usage
@@ -21,7 +23,8 @@ from codex_sdk.items import (
     TodoListItem,
     WebSearchItem,
 )
-from codex_sdk.thread import ParsedTurn, Thread, Turn, TurnOptions
+from codex_sdk.hooks import ThreadHooks
+from codex_sdk.thread import ParsedTurn, Thread, Turn, TurnOptions, normalize_input
 
 
 class FakeExecSequence:
@@ -469,3 +472,215 @@ async def test_turn_filters_work():
     assert [w.id for w in turn.web_searches()] == ["w"]
     assert [t.id for t in turn.todo_lists()] == ["t"]
     assert [e.id for e in turn.errors()] == ["e"]
+
+
+def test_run_json_sync_outside_event_loop():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"{\\"ok\\":true}"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    parsed = thread.run_json_sync("hi", output_schema={"type": "object"})
+    assert parsed.output == {"ok": True}
+
+
+def test_run_sync_with_options():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"ok"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    result = thread.run_sync("hi", TurnOptions())
+    assert result.final_response == "ok"
+
+
+def test_run_pydantic_sync_outside_event_loop():
+    class Result(BaseModel):
+        answer: str
+
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"{\\"answer\\":\\"ok\\"}"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    parsed = thread.run_pydantic_sync("hi", output_model=Result)
+    assert parsed.output.answer == "ok"
+
+
+@pytest.mark.asyncio
+async def test_run_with_hooks_invokes_callbacks():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"hello"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    seen = []
+    hooks = ThreadHooks(on_event=lambda event: seen.append(event.type))
+    turn = await thread.run_with_hooks("hi", hooks=hooks)
+    assert turn.final_response == "hello"
+    assert "turn.completed" in seen
+
+
+@pytest.mark.asyncio
+async def test_run_handles_non_agent_items():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"c1","type":"command_execution","command":"echo hi","aggregated_output":"","status":"completed"}}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"final"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    turn = await thread.run("hi")
+    assert turn.final_response == "final"
+
+
+@pytest.mark.asyncio
+async def test_run_with_hooks_raises_on_failure():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"turn.failed","error":{"message":"boom"}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    hooks = ThreadHooks(on_event=lambda _event: None)
+    with pytest.raises(TurnFailedError):
+        await thread.run_with_hooks("hi", hooks=hooks)
+
+
+@pytest.mark.asyncio
+async def test_run_pydantic_preserves_additional_properties():
+    class Result(BaseModel):
+        answer: str
+
+        @classmethod
+        def model_json_schema(cls, *args, **kwargs):
+            schema = super().model_json_schema(*args, **kwargs)
+            schema["additionalProperties"] = True
+            return schema
+
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"{\\"answer\\":\\"ok\\"}"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    parsed = await thread.run_pydantic("hi", output_model=Result)
+    assert parsed.output.answer == "ok"
+
+
+@pytest.mark.asyncio
+async def test_parse_item_mcp_tool_call_without_result():
+    thread = Thread(FakeExecSequence([[]]), CodexOptions(), ThreadOptions())
+    parsed = thread._parse_item(
+        {
+            "id": "mcp-1",
+            "type": "mcp_tool_call",
+            "server": "s",
+            "tool": "t",
+            "status": "completed",
+        }
+    )
+    assert parsed.result is None
+    assert parsed.error is None
+
+
+@pytest.mark.asyncio
+async def test_run_pydantic_requires_base_model(monkeypatch: pytest.MonkeyPatch):
+    exec = FakeExecSequence([[]])
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+
+    class Dummy:
+        pass
+
+    class FakeModule:
+        BaseModel = None
+
+    import importlib
+
+    monkeypatch.setattr(importlib, "import_module", lambda _name: FakeModule())
+    with pytest.raises(CodexError):
+        await thread.run_pydantic("hi", output_model=Dummy)
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_with_options():
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"turn.started"}',
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+    streamed = await thread.run_streamed("hi", TurnOptions())
+    events = []
+    async for event in streamed.events:
+        events.append(event.type)
+    assert events == ["turn.started", "turn.completed"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_non_awaitable(monkeypatch: pytest.MonkeyPatch):
+    exec = FakeExecSequence(
+        [
+            [
+                '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+            ]
+        ]
+    )
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+
+    async def fake_create_schema_file(_: Any):
+        def cleanup() -> None:
+            return None
+
+        return None, cleanup
+
+    import codex_sdk.thread as thread_module
+
+    monkeypatch.setattr(thread_module, "create_output_schema_file", fake_create_schema_file)
+    async for _ in thread.run_streamed_events("hi"):
+        pass
+
+
+def test_normalize_input_collects_images():
+    prompt, images = normalize_input(
+        [
+            {"type": "text", "text": "hello"},
+            {"type": "local_image", "path": "/tmp/a.png"},
+        ]
+    )
+    assert prompt == "hello"
+    assert images == ["/tmp/a.png"]

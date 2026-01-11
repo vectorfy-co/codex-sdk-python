@@ -156,6 +156,28 @@ class TestCodex:
         thread = codex.resume_last_thread()
         assert thread.id == "thread-home"
 
+    def test_find_latest_rollout_ignores_stat_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from codex_sdk.codex import _find_latest_rollout
+
+        sessions_root = tmp_path / "sessions"
+        sessions_root.mkdir()
+        good = sessions_root / "rollout-good.jsonl"
+        good.write_text("{}", encoding="utf-8")
+        bad = sessions_root / "rollout-bad.jsonl"
+        bad.write_text("{}", encoding="utf-8")
+
+        original_stat = Path.stat
+
+        def fake_stat(self: Path, *args, **kwargs):
+            if self == bad:
+                raise OSError("boom")
+            return original_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", fake_stat)
+        assert _find_latest_rollout(sessions_root) == good
+
 
 class TestThread:
     """Test cases for the Thread class."""

@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Not%20Configured-6b7280?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.0.0.dev0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.80.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -84,6 +84,51 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+For single-turn sessions with approval handling, use the turn session wrapper:
+
+```python
+import asyncio
+from codex_sdk import AppServerClient, AppServerOptions, ApprovalDecisions
+
+async def main() -> None:
+    async with AppServerClient(AppServerOptions()) as app:
+        thread = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread_id = thread["thread"]["id"]
+        session = await app.turn_session(
+            thread_id,
+            "Run tests and summarize failures.",
+            approvals=ApprovalDecisions(command_execution="accept"),
+        )
+
+        async for notification in session.notifications():
+            print(notification.method)
+
+        final_turn = await session.wait()
+        print(final_turn)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Examples
+
+Try the examples under `examples/`:
+
+```bash
+python examples/basic_usage.py
+python examples/streaming_example.py
+python examples/thread_resume.py
+python examples/app_server_basic.py
+python examples/app_server_fork.py
+python examples/app_server_requirements.py
+python examples/app_server_skill_input.py
+python examples/app_server_approvals.py
+python examples/app_server_turn_session.py
+python examples/config_overrides.py
+python examples/hooks_streaming.py
+python examples/notify_hook.py
+```
+
 <a id="features"></a>
 ## ![Features](https://img.shields.io/badge/Features-Core%20Capabilities-7c3aed?style=for-the-badge&logo=simpleicons&logoColor=white)
 
@@ -91,6 +136,7 @@ if __name__ == "__main__":
 | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
 | ![Threaded](https://img.shields.io/badge/Threads-Persistent%20Sessions-2563EB?style=flat&logo=serverless&logoColor=white) | Each `Thread` keeps context; resume by thread id or last session.        |
 | ![Streaming](https://img.shields.io/badge/Streaming-JSONL%20Events-0ea5e9?style=flat&logo=json&logoColor=white)    | `run_streamed()` yields structured events as they happen.               |
+| ![Hooks](https://img.shields.io/badge/Hooks-Event%20Callbacks-0f766e?style=flat&logo=codefactor&logoColor=white)  | `ThreadHooks` lets you react to streamed events inline.                 |
 | ![Structured](https://img.shields.io/badge/Structured%20Output-JSON%20Schema-22c55e?style=flat&logo=json&logoColor=white) | `run_json()` validates JSON output against a schema.                    |
 | ![Pydantic](https://img.shields.io/badge/Pydantic-Model%20Validation-0b3b2e?style=flat&logo=pydantic&logoColor=white) | `run_pydantic()` derives schema and validates with Pydantic v2.         |
 | ![Sandbox](https://img.shields.io/badge/Sandbox-Read%2FWrite%20Controls-1f2937?style=flat&logo=gnubash&logoColor=white) | Thread options map to Codex CLI sandbox and approval policies.          |
@@ -133,6 +179,10 @@ codex = Codex(
         base_url="https://api.openai.com/v1",
         api_key="<key>",
         env={"CUSTOM_ENV": "custom"},
+        config_overrides={
+            "analytics.enabled": True,
+            "notify": ["python3", "/path/to/notify.py"],
+        },
     )
 )
 ```
@@ -156,7 +206,6 @@ ThreadOptions(
     network_access_enabled=True,
     web_search_enabled=False,
     web_search_cached_enabled=False,
-    skills_enabled=True,
     shell_snapshot_enabled=True,
     background_terminals_enabled=True,
     apply_patch_freeform_enabled=False,
@@ -165,6 +214,7 @@ ThreadOptions(
     request_compression_enabled=True,
     approval_policy="on-request",
     additional_directories=["../shared"],
+    config_overrides={"analytics.enabled": True},
 )
 ```
 
@@ -177,7 +227,6 @@ Important mappings to the Codex CLI:
 - `network_access_enabled` maps to `--config sandbox_workspace_write.network_access=...`.
 - `web_search_enabled` maps to `--config features.web_search_request=...`.
 - `web_search_cached_enabled` maps to `--config features.web_search_cached=...`.
-- `skills_enabled` maps to `--config features.skills=...`.
 - `shell_snapshot_enabled` maps to `--config features.shell_snapshot=...`.
 - `background_terminals_enabled` maps to `--config features.unified_exec=...`.
 - `apply_patch_freeform_enabled` maps to `--config features.apply_patch_freeform=...`.
@@ -186,6 +235,9 @@ Important mappings to the Codex CLI:
 - `request_compression_enabled` maps to `--config features.enable_request_compression=...`.
 - `feature_overrides` maps to `--config features.<key>=...` (explicit options take precedence).
 - `approval_policy` maps to `--config approval_policy=...`.
+- `config_overrides` maps to repeated `--config key=value` entries.
+
+Note: `skills_enabled` is deprecated in Codex 0.80+ (skills are always enabled).
 
 Feature overrides example:
 
@@ -197,6 +249,70 @@ ThreadOptions(
     }
 )
 ```
+
+### App server (JSON-RPC)
+
+For richer integrations (thread fork, requirements, explicit skill input), use the app-server
+protocol. The client handles the initialize/initialized handshake and gives you access to
+JSON-RPC notifications.
+
+```python
+import asyncio
+from codex_sdk import AppServerClient, AppServerOptions
+
+async def main() -> None:
+    async with AppServerClient(AppServerOptions()) as app:
+        thread = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread_id = thread["thread"]["id"]
+        await app.turn_start(
+            thread_id,
+            [
+                {"type": "text", "text": "Use $my-skill and summarize."},
+                {"type": "skill", "name": "my-skill", "path": "/path/to/SKILL.md"},
+            ],
+        )
+
+        async for notification in app.notifications():
+            print(notification.method, notification.params)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+#### App-server convenience methods
+
+The SDK also exposes helpers for most app-server endpoints:
+
+- Threads: `thread_list`, `thread_archive`, `thread_rollback`, `thread_loaded_list`
+- Config: `config_read`, `config_value_write`, `config_batch_write`, `config_requirements_read`
+- Skills: `skills_list`
+- Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
+- Models: `model_list`
+- One-off commands: `command_exec`
+- MCP auth/status: `mcp_server_oauth_login`, `mcp_server_status_list`
+- Account: `account_login_start`, `account_login_cancel`, `account_logout`,
+  `account_rate_limits_read`, `account_read`
+- Feedback: `feedback_upload`
+
+These map 1:1 to the Codex app-server protocol; see `codex/codex-rs/app-server/README.md`
+for payload shapes and event semantics.
+
+### Observability (OTEL) and notify
+
+Codex emits OTEL traces/logs/metrics when configured in `~/.codex/config.toml`.
+For headless runs (`codex exec`), set `analytics.enabled=true` and provide OTEL exporters
+in the config file. You can also pass overrides with `config_overrides`.
+
+```python
+CodexOptions(
+    config_overrides={
+        "analytics.enabled": True,
+        "notify": ["python3", "/path/to/notify.py"],
+    }
+)
+```
+
+See `examples/notify_hook.py` for a ready-to-use notify script.
 
 ### TurnOptions (per turn)
 
@@ -278,6 +394,24 @@ To iterate directly without the wrapper:
 ```python
 async for event in thread.run_streamed_events("Diagnose the test failure"):
     print(event.type)
+```
+
+### Hooks for streamed events
+
+Use `ThreadHooks` to react to events without manually wiring an event loop.
+
+```python
+from codex_sdk import ThreadHooks
+
+hooks = ThreadHooks(
+    on_event=lambda event: print("event", event.type),
+    on_item_type={
+        "command_execution": lambda item: print("command", item.command),
+    },
+)
+
+turn = await thread.run_with_hooks("Run the tests and summarize failures.", hooks=hooks)
+print(turn.final_response)
 ```
 
 ### Event types (ThreadEvent)
@@ -384,6 +518,8 @@ Core classes:
 - `Thread`: `run()`, `run_streamed()`, `run_streamed_events()`, `run_json()`, `run_pydantic()`,
   plus `run_sync()`, `run_json_sync()`, `run_pydantic_sync()`.
 - `Turn`: `items`, `final_response`, `usage`, and helper filters.
+- `AppServerClient`, `AppServerTurnSession`, `ApprovalDecisions` for app-server integrations.
+- `ThreadHooks` for event callbacks.
 - `CodexOptions`, `ThreadOptions`, `TurnOptions`.
 - `AbortController`, `AbortSignal`.
 
@@ -406,6 +542,9 @@ Example scripts under `examples/`:
 - `thread_resume.py`: resume with `CODEX_THREAD_ID`.
 - `permission_levels_example.py`: sandbox modes and working directory.
 - `model_configuration_example.py`: model selection and endpoint config.
+- `app_server_turn_session.py`: approval-handled turns over app-server.
+- `hooks_streaming.py`: event hooks for streaming runs.
+- `notify_hook.py`: notify script for CLI callbacks.
 - `pydantic_ai_model_provider.py`: Codex as a PydanticAI model provider.
 - `pydantic_ai_handoff.py`: Codex as a PydanticAI tool.
 
@@ -642,6 +781,10 @@ uv run pytest --cov=codex_sdk
 
 Coverage is configured in `pyproject.toml` with `fail_under = 95`.
 
+### Upgrade checklist
+
+For SDK release updates, follow `UPGRADE_CHECKLIST.md`.
+
 ### Format and lint
 
 ```bash
@@ -659,10 +802,8 @@ uv run mypy src
 <a id="ci-cd"></a>
 ## ![CI/CD](https://img.shields.io/badge/CI%2FCD-Overview-1F4B99?style=for-the-badge&logo=gnubash&logoColor=white)
 
-This repository does not include a CI pipeline configuration. If you add CI, typical steps are:
-- Install dev dependencies.
-- Run `pytest`, `mypy`, `black --check`, and `isort --check-only`.
-- Build packages with `uv build`.
+This repository includes GitHub Actions workflows under `.github/workflows/`.
+The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
 
 <a id="operations"></a>
 ## ![Operations](https://img.shields.io/badge/Operations-Health%20%26%20Sessions-10b981?style=for-the-badge&logo=serverless&logoColor=white)

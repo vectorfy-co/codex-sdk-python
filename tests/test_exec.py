@@ -139,6 +139,10 @@ async def test_exec_passes_args_and_respects_env(monkeypatch: pytest.MonkeyPatch
         working_directory="/tmp/work",
         skip_git_repo_check=True,
         output_schema_file="/tmp/schema.json",
+        config_overrides={
+            "analytics.enabled": True,
+            "notify": ["python3", "/tmp/notify.py"],
+        },
     )
 
     async for _ in exec.run(args):
@@ -151,6 +155,11 @@ async def test_exec_passes_args_and_respects_env(monkeypatch: pytest.MonkeyPatch
     assert "--cd" in cmd_list and "/tmp/work" in cmd_list
     assert "--skip-git-repo-check" in cmd_list
     assert "--output-schema" in cmd_list and "/tmp/schema.json" in cmd_list
+    assert "--config" in cmd_list and "analytics.enabled=true" in cmd_list
+    assert (
+        "--config" in cmd_list
+        and 'notify=["python3", "/tmp/notify.py"]' in cmd_list
+    )
     assert cmd_list[-2:] == ["resume", "thread-123"]
 
     env = captured["env"]
@@ -281,7 +290,6 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         network_access_enabled=True,
         web_search_enabled=False,
         web_search_cached_enabled=True,
-        skills_enabled=True,
         shell_snapshot_enabled=True,
         background_terminals_enabled=False,
         apply_patch_freeform_enabled=True,
@@ -303,7 +311,6 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert "sandbox_workspace_write.network_access=true" in cmd_list
     assert "features.web_search_request=false" in cmd_list
     assert "features.web_search_cached=true" in cmd_list
-    assert "features.skills=true" in cmd_list
     assert "features.shell_snapshot=true" in cmd_list
     assert "features.unified_exec=false" in cmd_list
     assert "features.apply_patch_freeform=true" in cmd_list

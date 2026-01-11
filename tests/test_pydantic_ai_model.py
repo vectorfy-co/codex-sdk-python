@@ -1,9 +1,10 @@
 import dataclasses
 
 import pytest
-from pydantic import BaseModel
 
+pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai")
+BaseModel = pydantic.BaseModel
 
 from pydantic_ai.messages import (  # type: ignore[import-not-found]
     BuiltinToolCallPart,

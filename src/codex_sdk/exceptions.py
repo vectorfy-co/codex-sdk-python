@@ -38,3 +38,18 @@ class TurnFailedError(CodexError):
     def __init__(self, message: str, *, error: Optional[object] = None) -> None:
         super().__init__(message)
         self.error = error
+
+
+@dataclass
+class CodexAppServerError(CodexError):
+    """Raised when the Codex app-server returns a JSON-RPC error response."""
+
+    code: int
+    message: str
+    data: Optional[object] = None
+
+    def __post_init__(self) -> None:
+        detail = f"Codex app-server error {self.code}: {self.message}"
+        if self.data is not None:
+            detail = f"{detail} ({self.data})"
+        super().__init__(detail)
