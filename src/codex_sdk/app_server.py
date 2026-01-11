@@ -7,7 +7,17 @@ import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Union, TypedDict
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+    TypedDict,
+)
 
 from .config_overrides import ConfigOverrides, encode_config_overrides
 from .exceptions import CodexAppServerError, CodexError, CodexParseError
@@ -88,7 +98,9 @@ class AppServerTurnSession:
         self.initial_turn = initial_turn
         self.final_turn: Optional[Dict[str, Any]] = None
         self._approvals = approvals
-        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = asyncio.Queue()
+        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = (
+            asyncio.Queue()
+        )
         self._requests: asyncio.Queue[Optional[AppServerRequest]] = asyncio.Queue()
         self._task: Optional[asyncio.Task[None]] = None
         self._done = asyncio.Event()
@@ -155,7 +167,9 @@ class AppServerTurnSession:
     async def _pump(self) -> None:
         try:
             while True:
-                notification_task = asyncio.create_task(self._client.next_notification())
+                notification_task = asyncio.create_task(
+                    self._client.next_notification()
+                )
                 request_task = asyncio.create_task(self._client.next_request())
                 done, pending = await asyncio.wait(
                     {notification_task, request_task},
@@ -266,7 +280,9 @@ class AppServerClient:
         self._reader_task: Optional[asyncio.Task[None]] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
         self._pending: Dict[int, asyncio.Future[Any]] = {}
-        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = asyncio.Queue()
+        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = (
+            asyncio.Queue()
+        )
         self._requests: asyncio.Queue[Optional[AppServerRequest]] = asyncio.Queue()
         self._next_id = 1
         self._closed = False
@@ -356,9 +372,7 @@ class AppServerClient:
         if client_info is None:
             client_info = self._default_client_info()
 
-        result = await self.request(
-            "initialize", {"clientInfo": client_info.as_dict()}
-        )
+        result = await self.request("initialize", {"clientInfo": client_info.as_dict()})
         await self.notify("initialized")
         return result
 
@@ -383,7 +397,9 @@ class AppServerClient:
             result = await asyncio.wait_for(future, timeout=timeout)
         return result
 
-    async def notify(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    async def notify(
+        self, method: str, params: Optional[Dict[str, Any]] = None
+    ) -> None:
         self._ensure_ready()
         await self._send({"method": method, "params": params})
 
@@ -470,7 +486,9 @@ class AppServerClient:
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
         return await self.request("thread/archive", {"threadId": thread_id})
 
-    async def thread_rollback(self, thread_id: str, *, num_turns: int) -> Dict[str, Any]:
+    async def thread_rollback(
+        self, thread_id: str, *, num_turns: int
+    ) -> Dict[str, Any]:
         return await self.request(
             "thread/rollback", {"threadId": thread_id, "numTurns": num_turns}
         )
@@ -515,7 +533,10 @@ class AppServerClient:
         return await self.request("config/batchWrite", _coerce_keys(params))
 
     async def skills_list(
-        self, *, cwds: Optional[Sequence[Union[str, Path]]] = None, force_reload: bool = False
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        force_reload: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"force_reload": force_reload}
         if cwds:
@@ -674,7 +695,9 @@ class AppServerClient:
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise CodexParseError(f"Failed to parse app-server message: {line}") from exc
+                    raise CodexParseError(
+                        f"Failed to parse app-server message: {line}"
+                    ) from exc
 
                 if isinstance(data, dict) and "id" in data and "method" in data:
                     await self._requests.put(
@@ -838,16 +861,17 @@ def _normalize_decision(
         raise CodexError("Approval decision must be a string or mapping")
 
     normalized = decision.strip()
-    if normalized in {"accept_with_execpolicy_amendment", "acceptWithExecpolicyAmendment"}:
+    if normalized in {
+        "accept_with_execpolicy_amendment",
+        "acceptWithExecpolicyAmendment",
+    }:
         if execpolicy_amendment is None:
             raise CodexError(
                 "execpolicy_amendment is required for accept_with_execpolicy_amendment"
             )
         amendment_payload = _coerce_keys(execpolicy_amendment)
         return {
-            "acceptWithExecpolicyAmendment": {
-                "execpolicyAmendment": amendment_payload
-            }
+            "acceptWithExecpolicyAmendment": {"execpolicyAmendment": amendment_payload}
         }
 
     if "_" in normalized:

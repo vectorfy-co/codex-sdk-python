@@ -3,9 +3,6 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-pydantic = pytest.importorskip("pydantic")
-BaseModel = pydantic.BaseModel
-
 from codex_sdk import CodexOptions, ThreadOptions
 from codex_sdk.events import Usage
 from codex_sdk.exceptions import CodexError, CodexParseError, TurnFailedError
@@ -25,6 +22,9 @@ from codex_sdk.items import (
 )
 from codex_sdk.hooks import ThreadHooks
 from codex_sdk.thread import ParsedTurn, Thread, Turn, TurnOptions, normalize_input
+
+pydantic = pytest.importorskip("pydantic")
+BaseModel = pydantic.BaseModel
 
 
 class FakeExecSequence:
@@ -670,7 +670,9 @@ async def test_cleanup_non_awaitable(monkeypatch: pytest.MonkeyPatch):
 
     import codex_sdk.thread as thread_module
 
-    monkeypatch.setattr(thread_module, "create_output_schema_file", fake_create_schema_file)
+    monkeypatch.setattr(
+        thread_module, "create_output_schema_file", fake_create_schema_file
+    )
     async for _ in thread.run_streamed_events("hi"):
         pass
 

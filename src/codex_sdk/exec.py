@@ -220,7 +220,9 @@ class CodexExec:
 
         if args.apply_patch_freeform_enabled is not None:
             enabled = "true" if args.apply_patch_freeform_enabled else "false"
-            command_args.extend(["--config", f"features.apply_patch_freeform={enabled}"])
+            command_args.extend(
+                ["--config", f"features.apply_patch_freeform={enabled}"]
+            )
 
         if args.exec_policy_enabled is not None:
             enabled = "true" if args.exec_policy_enabled else "false"

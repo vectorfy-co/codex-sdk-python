@@ -156,10 +156,7 @@ async def test_exec_passes_args_and_respects_env(monkeypatch: pytest.MonkeyPatch
     assert "--skip-git-repo-check" in cmd_list
     assert "--output-schema" in cmd_list and "/tmp/schema.json" in cmd_list
     assert "--config" in cmd_list and "analytics.enabled=true" in cmd_list
-    assert (
-        "--config" in cmd_list
-        and 'notify=["python3", "/tmp/notify.py"]' in cmd_list
-    )
+    assert "--config" in cmd_list and 'notify=["python3", "/tmp/notify.py"]' in cmd_list
     assert cmd_list[-2:] == ["resume", "thread-123"]
 
     env = captured["env"]

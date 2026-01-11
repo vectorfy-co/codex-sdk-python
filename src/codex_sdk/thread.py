@@ -571,7 +571,7 @@ class Thread:
                 raise ImportError("pydantic.BaseModel not found")
         except ImportError as exc:  # pragma: no cover
             raise CodexError(
-                "Pydantic is required for run_pydantic(); install with: uv add \"codex-sdk-python[pydantic]\""
+                'Pydantic is required for run_pydantic(); install with: uv add "codex-sdk-python[pydantic]"'
             ) from exc
 
         if not isinstance(output_model, type) or not issubclass(
