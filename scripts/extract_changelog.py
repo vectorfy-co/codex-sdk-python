@@ -1,4 +1,59 @@
 #!/usr/bin/env python3
+"""Extract release notes for a tag from CHANGELOG_SDK.md."""
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+
+def extract_section(text: str, match: re.Match[str]) -> str:
+    start = match.start()
+    remainder = text[match.end() :]
+    next_header = re.search(r"^\s*##\s+\S+.*$", remainder, re.MULTILINE)
+    end = match.end() + (next_header.start() if next_header else len(remainder))
+    return text[start:end].strip()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Extract changelog section.")
+    parser.add_argument("--tag", required=True, help="Release tag (e.g. v0.81.0)")
+    parser.add_argument("--input", required=True, help="Path to CHANGELOG_SDK.md")
+    parser.add_argument("--output", required=True, help="Output release notes file")
+    args = parser.parse_args()
+
+    tag = args.tag
+    version = tag[1:] if tag.startswith("v") else tag
+    path = Path(args.input)
+    text = path.read_text(encoding="utf-8")
+
+    header_pattern = re.compile(rf"^\s*##\s+v?{re.escape(version)}\b.*$", re.MULTILINE)
+    match = header_pattern.search(text)
+    if match:
+        body = extract_section(text, match)
+    else:
+        first_header = re.search(r"^\s*##\s+\S+.*$", text, re.MULTILINE)
+        if first_header:
+            print(
+                f"::warning::Version {version} not found in {path}; "
+                "using the latest changelog section instead."
+            )
+            body = extract_section(text, first_header)
+        else:
+            print(
+                f"::warning::No changelog sections found in {path}; "
+                "using the full changelog contents instead."
+            )
+            body = text.strip()
+
+    Path(args.output).write_text(body + "\n", encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
