@@ -38,7 +38,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
-        "install with: uv add \"codex-sdk-python[pydantic-ai]\""
+        'install with: uv add "codex-sdk-python[pydantic-ai]"'
     ) from exc
 
 

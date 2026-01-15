@@ -197,43 +197,49 @@ class CodexExec:
                 command_args.extend(["--config", f"{config_key}={value}"])
 
         if args.network_access_enabled is not None:
-            enabled = "true" if args.network_access_enabled else "false"
+            enabled_str = "true" if args.network_access_enabled else "false"
             command_args.extend(
-                ["--config", f"sandbox_workspace_write.network_access={enabled}"]
+                ["--config", f"sandbox_workspace_write.network_access={enabled_str}"]
             )
 
         if args.web_search_enabled is not None:
-            enabled = "true" if args.web_search_enabled else "false"
-            command_args.extend(["--config", f"features.web_search_request={enabled}"])
+            enabled_str = "true" if args.web_search_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.web_search_request={enabled_str}"]
+            )
 
         if args.web_search_cached_enabled is not None:
-            enabled = "true" if args.web_search_cached_enabled else "false"
-            command_args.extend(["--config", f"features.web_search_cached={enabled}"])
+            enabled_str = "true" if args.web_search_cached_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.web_search_cached={enabled_str}"]
+            )
 
         if args.shell_snapshot_enabled is not None:
-            enabled = "true" if args.shell_snapshot_enabled else "false"
-            command_args.extend(["--config", f"features.shell_snapshot={enabled}"])
+            enabled_str = "true" if args.shell_snapshot_enabled else "false"
+            command_args.extend(["--config", f"features.shell_snapshot={enabled_str}"])
 
         if args.background_terminals_enabled is not None:
-            enabled = "true" if args.background_terminals_enabled else "false"
-            command_args.extend(["--config", f"features.unified_exec={enabled}"])
+            enabled_str = "true" if args.background_terminals_enabled else "false"
+            command_args.extend(["--config", f"features.unified_exec={enabled_str}"])
 
         if args.apply_patch_freeform_enabled is not None:
-            enabled = "true" if args.apply_patch_freeform_enabled else "false"
-            command_args.extend(["--config", f"features.apply_patch_freeform={enabled}"])
+            enabled_str = "true" if args.apply_patch_freeform_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.apply_patch_freeform={enabled_str}"]
+            )
 
         if args.exec_policy_enabled is not None:
-            enabled = "true" if args.exec_policy_enabled else "false"
-            command_args.extend(["--config", f"features.exec_policy={enabled}"])
+            enabled_str = "true" if args.exec_policy_enabled else "false"
+            command_args.extend(["--config", f"features.exec_policy={enabled_str}"])
 
         if args.remote_models_enabled is not None:
-            enabled = "true" if args.remote_models_enabled else "false"
-            command_args.extend(["--config", f"features.remote_models={enabled}"])
+            enabled_str = "true" if args.remote_models_enabled else "false"
+            command_args.extend(["--config", f"features.remote_models={enabled_str}"])
 
         if args.request_compression_enabled is not None:
-            enabled = "true" if args.request_compression_enabled else "false"
+            enabled_str = "true" if args.request_compression_enabled else "false"
             command_args.extend(
-                ["--config", f"features.enable_request_compression={enabled}"]
+                ["--config", f"features.enable_request_compression={enabled_str}"]
             )
 
         if args.approval_policy:

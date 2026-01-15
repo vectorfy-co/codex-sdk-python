@@ -20,10 +20,10 @@ from typing import (
     Union,
 )
 
+from .config_overrides import merge_config_overrides
 from .events import ThreadError, ThreadEvent, Usage
 from .exceptions import CodexError, CodexParseError, TurnFailedError
 from .exec import CodexExec, CodexExecArgs, create_output_schema_file
-from .config_overrides import merge_config_overrides
 from .hooks import ThreadHooks, dispatch_event
 from .items import (
     AgentMessageItem,
@@ -571,7 +571,7 @@ class Thread:
                 raise ImportError("pydantic.BaseModel not found")
         except ImportError as exc:  # pragma: no cover
             raise CodexError(
-                "Pydantic is required for run_pydantic(); install with: uv add \"codex-sdk-python[pydantic]\""
+                'Pydantic is required for run_pydantic(); install with: uv add "codex-sdk-python[pydantic]"'
             ) from exc
 
         if not isinstance(output_model, type) or not issubclass(

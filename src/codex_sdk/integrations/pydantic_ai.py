@@ -18,7 +18,7 @@ def _require_pydantic_ai() -> Any:
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "pydantic-ai is required for codex_sdk.integrations.pydantic_ai; "
-            "install with: uv add \"codex-sdk-python[pydantic-ai]\""
+            'install with: uv add "codex-sdk-python[pydantic-ai]"'
         ) from exc
     return pydantic_ai
 

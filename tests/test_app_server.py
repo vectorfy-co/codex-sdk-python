@@ -10,12 +10,12 @@ from codex_sdk.app_server import (
     AppServerNotification,
     AppServerOptions,
     AppServerRequest,
-    normalize_app_server_input,
     _coerce_keys,
-    _extract_turn,
-    _normalize_decision,
     _drain_stream,
+    _extract_turn,
     _iter_lines,
+    _normalize_decision,
+    normalize_app_server_input,
 )
 from codex_sdk.exceptions import CodexAppServerError, CodexError
 from codex_sdk.exec import INTERNAL_ORIGINATOR_ENV
@@ -48,7 +48,9 @@ class FakeStdin:
 
 
 class FakeProcess:
-    def __init__(self, stdout: QueueStream, stderr: Optional[QueueStream] = None) -> None:
+    def __init__(
+        self, stdout: QueueStream, stderr: Optional[QueueStream] = None
+    ) -> None:
         self.stdin = FakeStdin()
         self.stdout = stdout
         self.stderr = stderr
@@ -66,7 +68,9 @@ class FakeProcess:
 
 
 @pytest.mark.asyncio
-async def test_app_server_initialize_and_request(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_app_server_initialize_and_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     stdout = QueueStream()
     process = FakeProcess(stdout)
 
@@ -230,7 +234,9 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"] == {"cursor": "c", "limit": 1}
 
     task = asyncio.create_task(client.config_requirements_read())
-    _, payload = await expect_request(task, "configRequirements/read", {"requirements": None})
+    _, payload = await expect_request(
+        task, "configRequirements/read", {"requirements": None}
+    )
     assert "params" not in payload
 
     input_items = [
@@ -249,8 +255,12 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "turn/interrupt", {})
     assert payload["params"] == {"threadId": "t1", "turnId": "turn_1"}
 
-    task = asyncio.create_task(client.thread_list(cursor="c2", limit=2, model_providers=["openai"]))
-    _, payload = await expect_request(task, "thread/list", {"data": [], "nextCursor": None})
+    task = asyncio.create_task(
+        client.thread_list(cursor="c2", limit=2, model_providers=["openai"])
+    )
+    _, payload = await expect_request(
+        task, "thread/list", {"data": [], "nextCursor": None}
+    )
     assert payload["params"]["modelProviders"] == ["openai"]
 
     task = asyncio.create_task(client.thread_archive("t1"))
@@ -262,7 +272,9 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"] == {"threadId": "t1", "numTurns": 2}
 
     task = asyncio.create_task(client.config_read(include_layers=True))
-    _, payload = await expect_request(task, "config/read", {"config": {}, "origins": {}})
+    _, payload = await expect_request(
+        task, "config/read", {"config": {}, "origins": {}}
+    )
     assert payload["params"] == {"includeLayers": True}
 
     task = asyncio.create_task(
@@ -279,7 +291,9 @@ async def test_app_server_methods_and_input_normalization(
 
     task = asyncio.create_task(
         client.config_batch_write(
-            edits=[{"keyPath": "analytics.enabled", "value": True, "mergeStrategy": "set"}]
+            edits=[
+                {"keyPath": "analytics.enabled", "value": True, "mergeStrategy": "set"}
+            ]
         )
     )
     _, payload = await expect_request(task, "config/batchWrite", {"ok": True})
@@ -309,9 +323,17 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
     assert payload["params"]["command"] == ["echo", "hi"]
 
-    task = asyncio.create_task(client.mcp_server_oauth_login(name="server", scopes=["a"]))
-    _, payload = await expect_request(task, "mcpServer/oauth/login", {"authorizationUrl": "x"})
+    task = asyncio.create_task(
+        client.mcp_server_oauth_login(name="server", scopes=["a"])
+    )
+    _, payload = await expect_request(
+        task, "mcpServer/oauth/login", {"authorizationUrl": "x"}
+    )
     assert payload["params"]["name"] == "server"
+
+    task = asyncio.create_task(client.mcp_server_refresh())
+    _, payload = await expect_request(task, "config/mcpServer/reload", {})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.mcp_server_status_list(cursor="c", limit=1))
     _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})
@@ -324,7 +346,9 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"]["type"] == "apiKey"
 
     task = asyncio.create_task(client.account_login_cancel(login_id="login"))
-    _, payload = await expect_request(task, "account/login/cancel", {"status": "canceled"})
+    _, payload = await expect_request(
+        task, "account/login/cancel", {"status": "canceled"}
+    )
     assert payload["params"] == {"loginId": "login"}
 
     task = asyncio.create_task(client.account_logout())
@@ -332,7 +356,9 @@ async def test_app_server_methods_and_input_normalization(
     assert "params" not in payload
 
     task = asyncio.create_task(client.account_rate_limits_read())
-    _, payload = await expect_request(task, "account/rateLimits/read", {"rateLimits": {}})
+    _, payload = await expect_request(
+        task, "account/rateLimits/read", {"rateLimits": {}}
+    )
     assert "params" not in payload
 
     task = asyncio.create_task(client.account_read(refresh_token=True))
@@ -428,7 +454,9 @@ async def test_app_server_start_with_config_and_stderr(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
     client = AppServerClient(
-        AppServerOptions(auto_initialize=False, config_overrides={"analytics.enabled": True})
+        AppServerOptions(
+            auto_initialize=False, config_overrides={"analytics.enabled": True}
+        )
     )
     await client.start()
     cmd_list = list(captured["cmd"])
@@ -479,7 +507,9 @@ async def test_app_server_initialize_default_client_info(
     init_task = asyncio.create_task(client.initialize())
     await asyncio.sleep(0)
     init_request = json.loads(process.stdin.writes[-1].decode("utf-8"))
-    stdout.feed(json.dumps({"id": init_request["id"], "result": {"userAgent": "codex"}}))
+    stdout.feed(
+        json.dumps({"id": init_request["id"], "result": {"userAgent": "codex"}})
+    )
     result = await init_task
     assert result["userAgent"] == "codex"
     await client.close()
@@ -509,7 +539,9 @@ async def test_app_server_request_timeout(monkeypatch: pytest.MonkeyPatch) -> No
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
-    client = AppServerClient(AppServerOptions(auto_initialize=False, request_timeout=0.01))
+    client = AppServerClient(
+        AppServerOptions(auto_initialize=False, request_timeout=0.01)
+    )
     await client.start()
 
     with pytest.raises(asyncio.TimeoutError):
@@ -581,7 +613,10 @@ def test_app_server_decision_helpers() -> None:
 
 @pytest.mark.asyncio
 async def test_app_server_extract_turn_and_stream_helpers():
-    assert _extract_turn(AppServerNotification(method="turn/completed", params=None)) is None
+    assert (
+        _extract_turn(AppServerNotification(method="turn/completed", params=None))
+        is None
+    )
     assert _extract_turn(
         AppServerNotification(method="turn/completed", params={"id": "t"})
     ) == {"id": "t"}

@@ -7,7 +7,18 @@ import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Union, TypedDict
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from .config_overrides import ConfigOverrides, encode_config_overrides
 from .exceptions import CodexAppServerError, CodexError, CodexParseError
@@ -88,7 +99,9 @@ class AppServerTurnSession:
         self.initial_turn = initial_turn
         self.final_turn: Optional[Dict[str, Any]] = None
         self._approvals = approvals
-        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = asyncio.Queue()
+        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = (
+            asyncio.Queue()
+        )
         self._requests: asyncio.Queue[Optional[AppServerRequest]] = asyncio.Queue()
         self._task: Optional[asyncio.Task[None]] = None
         self._done = asyncio.Event()
@@ -155,7 +168,9 @@ class AppServerTurnSession:
     async def _pump(self) -> None:
         try:
             while True:
-                notification_task = asyncio.create_task(self._client.next_notification())
+                notification_task = asyncio.create_task(
+                    self._client.next_notification()
+                )
                 request_task = asyncio.create_task(self._client.next_request())
                 done, pending = await asyncio.wait(
                     {notification_task, request_task},
@@ -266,7 +281,9 @@ class AppServerClient:
         self._reader_task: Optional[asyncio.Task[None]] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
         self._pending: Dict[int, asyncio.Future[Any]] = {}
-        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = asyncio.Queue()
+        self._notifications: asyncio.Queue[Optional[AppServerNotification]] = (
+            asyncio.Queue()
+        )
         self._requests: asyncio.Queue[Optional[AppServerRequest]] = asyncio.Queue()
         self._next_id = 1
         self._closed = False
@@ -356,7 +373,7 @@ class AppServerClient:
         if client_info is None:
             client_info = self._default_client_info()
 
-        result = await self.request(
+        result = await self._request_dict(
             "initialize", {"clientInfo": client_info.as_dict()}
         )
         await self.notify("initialized")
@@ -383,7 +400,14 @@ class AppServerClient:
             result = await asyncio.wait_for(future, timeout=timeout)
         return result
 
-    async def notify(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    async def _request_dict(
+        self, method: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self.request(method, params))
+
+    async def notify(
+        self, method: str, params: Optional[Dict[str, Any]] = None
+    ) -> None:
         self._ensure_ready()
         await self._send({"method": method, "params": params})
 
@@ -429,17 +453,17 @@ class AppServerClient:
         await self._send(payload)
 
     async def thread_start(self, **params: Any) -> Dict[str, Any]:
-        return await self.request("thread/start", _coerce_keys(params))
+        return await self._request_dict("thread/start", _coerce_keys(params))
 
     async def thread_resume(self, thread_id: str, **params: Any) -> Dict[str, Any]:
         payload = {"threadId": thread_id}
         payload.update(_coerce_keys(params))
-        return await self.request("thread/resume", payload)
+        return await self._request_dict("thread/resume", payload)
 
     async def thread_fork(self, thread_id: str, **params: Any) -> Dict[str, Any]:
         payload = {"threadId": thread_id}
         payload.update(_coerce_keys(params))
-        return await self.request("thread/fork", payload)
+        return await self._request_dict("thread/fork", payload)
 
     async def thread_loaded_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
@@ -449,7 +473,7 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return await self.request("thread/loaded/list", params or None)
+        return await self._request_dict("thread/loaded/list", params or None)
 
     async def thread_list(
         self,
@@ -465,22 +489,24 @@ class AppServerClient:
             params["limit"] = limit
         if model_providers is not None:
             params["model_providers"] = list(model_providers)
-        return await self.request("thread/list", _coerce_keys(params) or None)
+        return await self._request_dict("thread/list", _coerce_keys(params) or None)
 
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
-        return await self.request("thread/archive", {"threadId": thread_id})
+        return await self._request_dict("thread/archive", {"threadId": thread_id})
 
-    async def thread_rollback(self, thread_id: str, *, num_turns: int) -> Dict[str, Any]:
-        return await self.request(
+    async def thread_rollback(
+        self, thread_id: str, *, num_turns: int
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
             "thread/rollback", {"threadId": thread_id, "numTurns": num_turns}
         )
 
     async def config_requirements_read(self) -> Dict[str, Any]:
-        return await self.request("configRequirements/read")
+        return await self._request_dict("configRequirements/read")
 
     async def config_read(self, *, include_layers: bool = False) -> Dict[str, Any]:
         params = {"include_layers": include_layers}
-        return await self.request("config/read", _coerce_keys(params))
+        return await self._request_dict("config/read", _coerce_keys(params))
 
     async def config_value_write(
         self,
@@ -498,7 +524,7 @@ class AppServerClient:
             "file_path": file_path,
             "expected_version": expected_version,
         }
-        return await self.request("config/value/write", _coerce_keys(params))
+        return await self._request_dict("config/value/write", _coerce_keys(params))
 
     async def config_batch_write(
         self,
@@ -512,15 +538,18 @@ class AppServerClient:
             "file_path": file_path,
             "expected_version": expected_version,
         }
-        return await self.request("config/batchWrite", _coerce_keys(params))
+        return await self._request_dict("config/batchWrite", _coerce_keys(params))
 
     async def skills_list(
-        self, *, cwds: Optional[Sequence[Union[str, Path]]] = None, force_reload: bool = False
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        force_reload: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"force_reload": force_reload}
         if cwds:
             payload["cwds"] = [str(path) for path in cwds]
-        return await self.request("skills/list", _coerce_keys(payload))
+        return await self._request_dict("skills/list", _coerce_keys(payload))
 
     async def turn_start(
         self,
@@ -530,7 +559,7 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         payload = {"threadId": thread_id, "input": normalize_app_server_input(input)}
         payload.update(_coerce_keys(params))
-        return await self.request("turn/start", payload)
+        return await self._request_dict("turn/start", payload)
 
     async def review_start(
         self,
@@ -542,7 +571,7 @@ class AppServerClient:
         payload: Dict[str, Any] = {"thread_id": thread_id, "target": dict(target)}
         if delivery is not None:
             payload["delivery"] = delivery
-        return await self.request("review/start", _coerce_keys(payload))
+        return await self._request_dict("review/start", _coerce_keys(payload))
 
     async def turn_session(
         self,
@@ -571,7 +600,7 @@ class AppServerClient:
         return session
 
     async def turn_interrupt(self, thread_id: str, turn_id: str) -> Dict[str, Any]:
-        return await self.request(
+        return await self._request_dict(
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
         )
 
@@ -583,7 +612,7 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return await self.request("model/list", params or None)
+        return await self._request_dict("model/list", params or None)
 
     async def command_exec(
         self,
@@ -600,7 +629,7 @@ class AppServerClient:
             params["cwd"] = str(cwd)
         if sandbox_policy is not None:
             params["sandbox_policy"] = dict(sandbox_policy)
-        return await self.request("command/exec", _coerce_keys(params))
+        return await self._request_dict("command/exec", _coerce_keys(params))
 
     async def mcp_server_oauth_login(
         self, *, name: str, scopes: Optional[Sequence[str]] = None
@@ -608,7 +637,10 @@ class AppServerClient:
         params: Dict[str, Any] = {"name": name}
         if scopes is not None:
             params["scopes"] = list(scopes)
-        return await self.request("mcpServer/oauth/login", _coerce_keys(params))
+        return await self._request_dict("mcpServer/oauth/login", _coerce_keys(params))
+
+    async def mcp_server_refresh(self) -> Dict[str, Any]:
+        return await self._request_dict("config/mcpServer/reload")
 
     async def mcp_server_status_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
@@ -618,22 +650,22 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return await self.request("mcpServerStatus/list", params or None)
+        return await self._request_dict("mcpServerStatus/list", params or None)
 
     async def account_login_start(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
-        return await self.request("account/login/start", dict(params))
+        return await self._request_dict("account/login/start", dict(params))
 
     async def account_login_cancel(self, *, login_id: str) -> Dict[str, Any]:
-        return await self.request("account/login/cancel", {"loginId": login_id})
+        return await self._request_dict("account/login/cancel", {"loginId": login_id})
 
     async def account_logout(self) -> Dict[str, Any]:
-        return await self.request("account/logout")
+        return await self._request_dict("account/logout")
 
     async def account_rate_limits_read(self) -> Dict[str, Any]:
-        return await self.request("account/rateLimits/read")
+        return await self._request_dict("account/rateLimits/read")
 
     async def account_read(self, *, refresh_token: bool = False) -> Dict[str, Any]:
-        return await self.request(
+        return await self._request_dict(
             "account/read", {"refreshToken": refresh_token} if refresh_token else None
         )
 
@@ -651,7 +683,7 @@ class AppServerClient:
             "thread_id": thread_id,
             "include_logs": include_logs,
         }
-        return await self.request("feedback/upload", _coerce_keys(params))
+        return await self._request_dict("feedback/upload", _coerce_keys(params))
 
     def _ensure_ready(self) -> None:
         if self._process is None:
@@ -674,7 +706,9 @@ class AppServerClient:
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise CodexParseError(f"Failed to parse app-server message: {line}") from exc
+                    raise CodexParseError(
+                        f"Failed to parse app-server message: {line}"
+                    ) from exc
 
                 if isinstance(data, dict) and "id" in data and "method" in data:
                     await self._requests.put(
@@ -838,16 +872,17 @@ def _normalize_decision(
         raise CodexError("Approval decision must be a string or mapping")
 
     normalized = decision.strip()
-    if normalized in {"accept_with_execpolicy_amendment", "acceptWithExecpolicyAmendment"}:
+    if normalized in {
+        "accept_with_execpolicy_amendment",
+        "acceptWithExecpolicyAmendment",
+    }:
         if execpolicy_amendment is None:
             raise CodexError(
                 "execpolicy_amendment is required for accept_with_execpolicy_amendment"
             )
         amendment_payload = _coerce_keys(execpolicy_amendment)
         return {
-            "acceptWithExecpolicyAmendment": {
-                "execpolicyAmendment": amendment_payload
-            }
+            "acceptWithExecpolicyAmendment": {"execpolicyAmendment": amendment_payload}
         }
 
     if "_" in normalized:

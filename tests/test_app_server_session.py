@@ -3,12 +3,12 @@ import asyncio
 import pytest
 
 from codex_sdk.app_server import (
+    ApprovalDecisions,
     AppServerClient,
     AppServerNotification,
+    AppServerOptions,
     AppServerRequest,
     AppServerTurnSession,
-    ApprovalDecisions,
-    AppServerOptions,
 )
 from codex_sdk.exceptions import CodexError
 
@@ -172,6 +172,7 @@ async def test_app_server_client_turn_session_starts_session(
 async def test_turn_session_context_manager_and_generators():
     client = FakeAppServerClient()
     async with AppServerTurnSession(client, thread_id="thr", turn_id="turn") as session:
+
         async def collect_notifications():
             seen = []
             async for note in session.notifications():
@@ -195,7 +196,9 @@ async def test_turn_session_context_manager_and_generators():
             )
         )
         await client.notifications.put(
-            AppServerNotification(method="turn/started", params={"turn": {"id": "turn"}})
+            AppServerNotification(
+                method="turn/started", params={"turn": {"id": "turn"}}
+            )
         )
         await client.notifications.put(
             AppServerNotification(

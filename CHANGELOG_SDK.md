@@ -2,6 +2,25 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## 0.81.0 (2026-01-15)
+
+### Added
+- App-server helper for `config/mcpServer/reload` to refresh MCP server config.
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.81.0 via `scripts/setup_binary.py`.
+- README updated with the new `mcp_server_refresh` convenience method.
+- SDK version set to 0.81.0 to match Codex CLI release.
+
+### Deprecated
+- Python 3.8 and 3.9 support are deprecated and will be removed in a future release.
+
+### Notes
+- Codex 0.81.0 default model is now `gpt-5.2-codex`.
+- Headless runs automatically switch to device-code login.
+- Linux sandbox supports read-only bind mounts; app-server now emits `configWarning`
+  notifications for config/rules parse errors.
+
 ## 0.80.0 (2026-01-11)
 
 ### Added
@@ -19,6 +38,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - App-server error type (`CodexAppServerError`).
 - Pytest `conftest.py` to make `uv run pytest` work without extra PYTHONPATH setup.
 - Added `UPGRADE_CHECKLIST.md` to guide future release updates.
+- GitHub Actions release workflow that creates GitHub releases from `CHANGELOG_SDK.md`.
 
 ### Updated
 - Bundled Codex CLI vendor binaries updated to 0.80.0 via `scripts/setup_binary.py`.
