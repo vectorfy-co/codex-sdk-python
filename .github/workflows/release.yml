@@ -50,24 +50,28 @@ jobs:
           def extract_section(match_obj):
             start = match_obj.start()
             remainder = text[match_obj.end():]
-            next_header = re.search(r"^##\\s+\\S+.*$", remainder, re.MULTILINE)
+            next_header = re.search(r"^\\s*##\\s+\\S+.*$", remainder, re.MULTILINE)
             end = match_obj.end() + (next_header.start() if next_header else len(remainder))
             return text[start:end].strip()
 
-          header_pattern = re.compile(rf"^##\\s+v?{re.escape(version)}\\b.*$", re.MULTILINE)
+          header_pattern = re.compile(rf"^\\s*##\\s+v?{re.escape(version)}\\b.*$", re.MULTILINE)
           match = header_pattern.search(text)
           if match:
             body = extract_section(match)
           else:
-            first_header = re.search(r"^##\\s+\\S+.*$", text, re.MULTILINE)
-            if not first_header:
-              print(f"::error::No changelog sections found in {path}")
-              sys.exit(1)
-            print(
-              f"::warning::Version {version} not found in {path}; "
-              "using the latest changelog section instead."
-            )
-            body = extract_section(first_header)
+            first_header = re.search(r"^\\s*##\\s+\\S+.*$", text, re.MULTILINE)
+            if first_header:
+              print(
+                f"::warning::Version {version} not found in {path}; "
+                "using the latest changelog section instead."
+              )
+              body = extract_section(first_header)
+            else:
+              print(
+                f"::warning::No changelog sections found in {path}; "
+                "using the full changelog contents instead."
+              )
+              body = text.strip()
 
           with open("release_notes.md", "w", encoding="utf-8") as handle:
             handle.write(body + "\n")
