@@ -5,15 +5,18 @@ build-backend = "uv_build"
 [project]
 name = "codex-sdk-python"
 version = "0.81.0"
-description = "Python SDK for Codex APIs"
+description = "Python SDK for the Codex CLI agent with async threads, streaming events, and structured outputs"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "OpenAI", email = "support@openai.com"}
+    {name = "Vectorfy Co", email = "git@vectorfy.co"}
 ]
-keywords = ["openai", "codex", "sdk", "python", "api"]
+maintainers = [
+    {name = "Vectorfy Co", email = "git@vectorfy.co"}
+]
+keywords = ["codex", "sdk", "python", "api", "cli", "agent", "async", "streaming"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
@@ -24,6 +27,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Build Tools",
 ]
 requires-python = ">=3.8"
 dependencies = []
@@ -53,9 +57,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/andreamaspero/codex-sdk-python"
-Repository = "https://github.com/andreamaspero/codex-sdk-python"
-Documentation = "https://github.com/andreamaspero/codex-sdk-python"
+Homepage = "https://vectorfy.co"
+Repository = "https://github.com/vectorfy-co/codex-sdk-python"
+Documentation = "https://github.com/vectorfy-co/codex-sdk-python#readme"
+Issues = "https://github.com/vectorfy-co/codex-sdk-python/issues"
+Changelog = "https://github.com/vectorfy-co/codex-sdk-python/blob/main/CHANGELOG_SDK.md"
 
 [tool.uv.build-backend]
 module-name = "codex_sdk"
