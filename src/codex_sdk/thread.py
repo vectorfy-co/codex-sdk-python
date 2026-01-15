@@ -277,6 +277,7 @@ class Thread:
                     output_schema_file=schema_path,
                     model_reasoning_effort=self._thread_options.model_reasoning_effort,
                     network_access_enabled=self._thread_options.network_access_enabled,
+                    web_search_mode=self._thread_options.web_search_mode,
                     web_search_enabled=self._thread_options.web_search_enabled,
                     web_search_cached_enabled=self._thread_options.web_search_cached_enabled,
                     skills_enabled=self._thread_options.skills_enabled,

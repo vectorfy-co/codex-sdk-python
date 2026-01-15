@@ -12,6 +12,7 @@ ApprovalMode = Literal["never", "on-request", "on-failure", "untrusted"]
 SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 
 ModelReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
+WebSearchMode = Literal["disabled", "cached", "live"]
 
 
 @dataclass
@@ -55,6 +56,7 @@ class ThreadOptions:
         skip_git_repo_check: Skip Git repository safety check.
         model_reasoning_effort: Model reasoning effort preset.
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
+        web_search_mode: Web search mode ("disabled", "cached", or "live").
         web_search_enabled: Enable/disable web search feature.
         web_search_cached_enabled: Enable/disable cached web search feature.
         skills_enabled: (Deprecated) Skills are always enabled in Codex 0.80+.
@@ -88,6 +90,9 @@ class ThreadOptions:
 
     # Enable/disable network access in workspace-write sandbox
     network_access_enabled: Optional[bool] = None
+
+    # Web search mode ("disabled", "cached", or "live")
+    web_search_mode: Optional[WebSearchMode] = None
 
     # Enable/disable web search feature
     web_search_enabled: Optional[bool] = None
