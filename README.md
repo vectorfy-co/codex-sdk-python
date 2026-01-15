@@ -37,7 +37,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
 </div>
 
 - Runtime dependency-free: uses only the Python standard library.
-- Bundled Codex CLI binaries per platform; `scripts/setup_binary.py` can refresh them from the npm package.
+- Codex CLI binaries are downloaded separately; use `scripts/setup_binary.py` from the repo or install the Codex CLI and set `codex_path_override`.
 - Async-first API with sync helpers, streaming events, and structured output.
 - Python 3.8/3.9 support is deprecated and will be removed in a future release; use Python 3.10+.
 
@@ -50,11 +50,15 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
 uv add codex-sdk-python
 ```
 
-2. Ensure the bundled `codex` binary exists (only needed if you are working from source or the vendor directory is missing):
+2. Ensure a `codex` binary is available (required for local runs):
 
 ```bash
+# From the repo source (downloads vendor binaries)
 python scripts/setup_binary.py
 ```
+
+If you installed from PyPI, install the Codex CLI separately and either add it to your PATH
+or pass `CodexOptions.codex_path_override`.
 
 3. Authenticate with Codex:
 
