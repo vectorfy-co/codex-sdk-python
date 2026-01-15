@@ -289,7 +289,7 @@ The SDK also exposes helpers for most app-server endpoints:
 - Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`
 - One-off commands: `command_exec`
-- MCP auth/status: `mcp_server_oauth_login`, `mcp_server_status_list`
+- MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
 - Account: `account_login_start`, `account_login_cancel`, `account_logout`,
   `account_rate_limits_read`, `account_read`
 - Feedback: `feedback_upload`

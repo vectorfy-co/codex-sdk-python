@@ -10,12 +10,12 @@ from codex_sdk.app_server import (
     AppServerNotification,
     AppServerOptions,
     AppServerRequest,
-    normalize_app_server_input,
     _coerce_keys,
-    _extract_turn,
-    _normalize_decision,
     _drain_stream,
+    _extract_turn,
     _iter_lines,
+    _normalize_decision,
+    normalize_app_server_input,
 )
 from codex_sdk.exceptions import CodexAppServerError, CodexError
 from codex_sdk.exec import INTERNAL_ORIGINATOR_ENV
@@ -330,6 +330,10 @@ async def test_app_server_methods_and_input_normalization(
         task, "mcpServer/oauth/login", {"authorizationUrl": "x"}
     )
     assert payload["params"]["name"] == "server"
+
+    task = asyncio.create_task(client.mcp_server_refresh())
+    _, payload = await expect_request(task, "config/mcpServer/reload", {})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.mcp_server_status_list(cursor="c", limit=1))
     _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})

@@ -6,6 +6,7 @@ import pytest
 from codex_sdk import CodexOptions, ThreadOptions
 from codex_sdk.events import Usage
 from codex_sdk.exceptions import CodexError, CodexParseError, TurnFailedError
+from codex_sdk.hooks import ThreadHooks
 from codex_sdk.items import (
     AgentMessageItem,
     CommandExecutionItem,
@@ -20,7 +21,6 @@ from codex_sdk.items import (
     TodoListItem,
     WebSearchItem,
 )
-from codex_sdk.hooks import ThreadHooks
 from codex_sdk.thread import ParsedTurn, Thread, Turn, TurnOptions, normalize_input
 
 pydantic = pytest.importorskip("pydantic")
