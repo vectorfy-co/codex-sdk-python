@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.81.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.85.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -209,8 +209,7 @@ ThreadOptions(
     skip_git_repo_check=True,
     model_reasoning_effort="high",
     network_access_enabled=True,
-    web_search_enabled=False,
-    web_search_cached_enabled=False,
+    web_search_mode="cached",
     shell_snapshot_enabled=True,
     background_terminals_enabled=True,
     apply_patch_freeform_enabled=False,
@@ -230,8 +229,9 @@ Important mappings to the Codex CLI:
 - `skip_git_repo_check` maps to `--skip-git-repo-check`.
 - `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
 - `network_access_enabled` maps to `--config sandbox_workspace_write.network_access=...`.
-- `web_search_enabled` maps to `--config features.web_search_request=...`.
-- `web_search_cached_enabled` maps to `--config features.web_search_cached=...`.
+- `web_search_mode` maps to `--config web_search="disabled|cached|live"`.
+- `web_search_enabled`/`web_search_cached_enabled` map to `--config web_search=...` for legacy
+  compatibility.
 - `shell_snapshot_enabled` maps to `--config features.shell_snapshot=...`.
 - `background_terminals_enabled` maps to `--config features.unified_exec=...`.
 - `apply_patch_freeform_enabled` maps to `--config features.apply_patch_freeform=...`.
@@ -567,7 +567,7 @@ Additional controls:
 - `additional_directories`: allowlist extra folders when using `workspace-write`.
 - `approval_policy`: `never`, `on-request`, `on-failure`, `untrusted`.
 - `network_access_enabled`: toggles network access in workspace-write sandbox.
-- `web_search_enabled`: toggles web search requests.
+- `web_search_mode`: toggles web search (`disabled`, `cached`, `live`).
 
 <a id="pydantic-ai"></a>
 ## ![PydanticAI](https://img.shields.io/badge/PydanticAI-Integrations-0b3b2e?style=for-the-badge&logo=pydantic&logoColor=white)
@@ -609,7 +609,7 @@ Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`
 - `skip_git_repo_check=True`
 - `approval_policy="never"`
-- `web_search_enabled=False`
+- `web_search_mode="disabled"`
 - `network_access_enabled=False`
 
 ### 2) Codex as a PydanticAI tool (handoff)
@@ -836,7 +836,7 @@ the package to PyPI on release publish.
 - Prefer `read-only` or `workspace-write` sandboxes in production.
 - Set `working_directory` to a repo root and keep `skip_git_repo_check=False` where possible.
 - Configure `approval_policy` for any tool execution requiring user consent.
-- Disable `web_search_enabled` and `network_access_enabled` unless explicitly needed.
+- Disable `web_search_mode` and `network_access_enabled` unless explicitly needed.
 
 <a id="license"></a>
 ## ![License](https://img.shields.io/badge/License-Apache--2.0-0f766e?style=for-the-badge&logo=apache&logoColor=white)

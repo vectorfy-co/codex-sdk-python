@@ -264,8 +264,12 @@ class CodexModel(Model):
             thread_options.sandbox_mode = "read-only"
         if thread_options.approval_policy is None:
             thread_options.approval_policy = "never"
-        if thread_options.web_search_enabled is None:
-            thread_options.web_search_enabled = False
+        if (
+            thread_options.web_search_mode is None
+            and thread_options.web_search_enabled is None
+            and thread_options.web_search_cached_enabled is None
+        ):
+            thread_options.web_search_mode = "disabled"
         if thread_options.network_access_enabled is None:
             thread_options.network_access_enabled = False
 
