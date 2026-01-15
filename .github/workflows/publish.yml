@@ -24,12 +24,7 @@ jobs:
       - name: Build
         run: uv build --no-sources
 
-      - name: Publish to PyPI (token)
-        if: ${{ secrets.PYPI_TOKEN != '' }}
+      - name: Publish to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish
-
-      - name: Publish to PyPI (OIDC)
-        if: ${{ secrets.PYPI_TOKEN == '' }}
         run: uv publish
