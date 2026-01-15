@@ -604,6 +604,8 @@ How it works:
 - `CodexModel` builds a JSON schema envelope with `tool_calls` and `final`.
 - Codex emits tool calls as JSON strings; PydanticAI runs them.
 - If `allow_text_output` is true, Codex can place final text in `final`.
+- Streaming APIs (`Agent.run_stream_events()`, `Agent.run_stream_sync()`) are supported; Codex
+  emits streamed responses as a single chunk once the turn completes.
 
 Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`
