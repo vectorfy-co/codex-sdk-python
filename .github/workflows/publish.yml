@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -11,9 +14,12 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.event.release.tag_name || github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
