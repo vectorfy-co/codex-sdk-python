@@ -139,7 +139,20 @@ class CodexExec:
         binary_name = "codex.exe" if system == "windows" else "codex"
         binary_path = arch_root / "codex" / binary_name
 
-        return str(binary_path)
+        if binary_path.exists():
+            return str(binary_path)
+
+        path_binary = shutil.which(binary_name)
+        if path_binary:
+            return path_binary
+
+        raise CodexError(
+            "Codex CLI binary not found. Expected it at "
+            f"{binary_path} or on PATH. If you're working from source, run "
+            "`python scripts/setup_binary.py` to download the vendor binaries. "
+            "Otherwise, install the Codex CLI separately or pass "
+            "`CodexOptions.codex_path_override`."
+        )
 
     async def run(self, args: CodexExecArgs) -> AsyncGenerator[str, None]:
         """

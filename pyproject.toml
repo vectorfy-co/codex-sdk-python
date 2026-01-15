@@ -65,6 +65,8 @@ Changelog = "https://github.com/vectorfy-co/codex-sdk-python/blob/main/CHANGELOG
 
 [tool.uv.build-backend]
 module-name = "codex_sdk"
+source-exclude = ["src/codex_sdk/vendor/**"]
+wheel-exclude = ["codex_sdk/vendor/**"]
 
 [tool.black]
 line-length = 88

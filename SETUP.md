@@ -1,6 +1,8 @@
 # Codex Python SDK Setup Guide
 
 This guide will help you set up the Codex Python SDK with the real codex binary.
+PyPI distributions do not bundle the binaries, so use this script when working
+from source or when you need to download the vendor assets locally.
 
 ## Quick Setup
 
