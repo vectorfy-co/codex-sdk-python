@@ -12,6 +12,9 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - README updated with the new `mcp_server_refresh` convenience method.
 - SDK version set to 0.81.0 to match Codex CLI release.
 
+### Deprecated
+- Python 3.8 and 3.9 support are deprecated and will be removed in a future release.
+
 ### Notes
 - Codex 0.81.0 default model is now `gpt-5.2-codex`.
 - Headless runs automatically switch to device-code login.
