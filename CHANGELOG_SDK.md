@@ -6,6 +6,8 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 
 ### Added
 - `web_search_mode` thread option (`disabled`, `cached`, `live`) mapped to `--config web_search=...`.
+- PydanticAI model provider now supports streamed responses and includes tool metadata in the
+  prompt (kind/strict/timeout/metadata).
 
 ### Updated
 - Legacy `web_search_enabled`/`web_search_cached_enabled` now map to `web_search` for CLI
