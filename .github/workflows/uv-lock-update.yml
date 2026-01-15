@@ -1,0 +1,52 @@
+name: Update uv.lock
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-uv-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Upgrade locked dependencies
+        run: uv lock --upgrade
+        env:
+          UV_PYTHON: python3.12
+
+      - name: Validate lock installs (all extras + dev)
+        run: uv sync --locked --all-extras --dev
+        env:
+          UV_PYTHON: python3.12
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "chore(deps): upgrade uv.lock"
+          title: "chore(deps): upgrade uv.lock"
+          body: |
+            Automated weekly dependency refresh.
+
+            - Regenerated `uv.lock` using `uv lock --upgrade`
+            - Verified install with `uv sync --locked --all-extras --dev`
+          branch: "chore/uv-lock-upgrade"
+          delete-branch: true
+          add-paths: |
+            uv.lock

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from codex_sdk import AppServerClient, AppServerOptions, ApprovalDecisions
+from codex_sdk import ApprovalDecisions, AppServerClient, AppServerOptions
 
 
 async def main() -> None:

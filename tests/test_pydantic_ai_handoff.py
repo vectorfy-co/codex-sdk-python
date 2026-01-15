@@ -1,11 +1,9 @@
 import asyncio
+import importlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import pytest
-
-pytest.importorskip("pydantic_ai")
-from pydantic_ai.tools import Tool
 
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai import (
@@ -27,6 +25,10 @@ from codex_sdk.items import (
     WebSearchItem,
 )
 from codex_sdk.thread import Turn
+
+pytest.importorskip("pydantic_ai")
+tools = importlib.import_module("pydantic_ai.tools")
+Tool = tools.Tool
 
 
 @dataclass

@@ -1,26 +1,7 @@
 import dataclasses
+import importlib
 
 import pytest
-
-pydantic = pytest.importorskip("pydantic")
-pytest.importorskip("pydantic_ai")
-BaseModel = pydantic.BaseModel
-
-from pydantic_ai.messages import (  # type: ignore[import-not-found]
-    BuiltinToolCallPart,
-    FilePart,
-    ModelRequest,
-    ModelResponse,
-    RetryPromptPart,
-    SystemPromptPart,
-    TextPart,
-    ThinkingPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
-from pydantic_ai.models import ModelRequestParameters  # type: ignore[import-not-found]
-from pydantic_ai.tools import ToolDefinition  # type: ignore[import-not-found]
 
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
@@ -35,6 +16,28 @@ from codex_sdk.integrations.pydantic_ai_model import (
 )
 from codex_sdk.options import CodexOptions
 from codex_sdk.thread import ParsedTurn, Turn
+
+pydantic = pytest.importorskip("pydantic")
+pytest.importorskip("pydantic_ai")
+BaseModel = pydantic.BaseModel
+
+messages = importlib.import_module("pydantic_ai.messages")
+models = importlib.import_module("pydantic_ai.models")
+tools = importlib.import_module("pydantic_ai.tools")
+
+BuiltinToolCallPart = messages.BuiltinToolCallPart
+FilePart = messages.FilePart
+ModelRequest = messages.ModelRequest
+ModelResponse = messages.ModelResponse
+RetryPromptPart = messages.RetryPromptPart
+SystemPromptPart = messages.SystemPromptPart
+TextPart = messages.TextPart
+ThinkingPart = messages.ThinkingPart
+ToolCallPart = messages.ToolCallPart
+ToolReturnPart = messages.ToolReturnPart
+UserPromptPart = messages.UserPromptPart
+ModelRequestParameters = models.ModelRequestParameters
+ToolDefinition = tools.ToolDefinition
 
 
 class FakeThread:

@@ -7,8 +7,8 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
     <tr>
       <td><strong>Lifecycle</strong></td>
       <td>
-        <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Not%20Configured-6b7280?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.80.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
+        <img src="https://img.shields.io/badge/Release-0.81.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -39,6 +39,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
 - Runtime dependency-free: uses only the Python standard library.
 - Bundled Codex CLI binaries per platform; `scripts/setup_binary.py` can refresh them from the npm package.
 - Async-first API with sync helpers, streaming events, and structured output.
+- Python 3.8/3.9 support is deprecated and will be removed in a future release; use Python 3.10+.
 
 <a id="quick-start"></a>
 ## ![Quick Start](https://img.shields.io/badge/Quick%20Start-4%20steps-059669?style=for-the-badge&logo=serverless&logoColor=white)
@@ -289,7 +290,7 @@ The SDK also exposes helpers for most app-server endpoints:
 - Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`
 - One-off commands: `command_exec`
-- MCP auth/status: `mcp_server_oauth_login`, `mcp_server_status_list`
+- MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
 - Account: `account_login_start`, `account_login_cancel`, `account_logout`,
   `account_rate_limits_read`, `account_read`
 - Feedback: `feedback_upload`
@@ -804,6 +805,9 @@ uv run mypy src
 
 This repository includes GitHub Actions workflows under `.github/workflows/`.
 The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
+Release automation creates GitHub releases from `CHANGELOG_SDK.md` when you push a
+`vX.Y.Z` tag or manually dispatch the workflow, then the publish workflow uploads
+the package to PyPI on release publish.
 
 <a id="operations"></a>
 ## ![Operations](https://img.shields.io/badge/Operations-Health%20%26%20Sessions-10b981?style=for-the-badge&logo=serverless&logoColor=white)

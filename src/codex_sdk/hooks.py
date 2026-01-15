@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from .events import ThreadEvent
 from .items import ThreadItem

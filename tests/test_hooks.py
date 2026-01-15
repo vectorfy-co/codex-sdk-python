@@ -35,9 +35,13 @@ async def test_dispatch_event_calls_hooks():
         on_turn_failed=lambda event: calls.append(("turn_failed", event.type)),
         on_item_started=lambda event: calls.append(("item_started", event.item.type)),
         on_item_updated=lambda event: calls.append(("item_updated", event.item.type)),
-        on_item_completed=lambda event: calls.append(("item_completed", event.item.type)),
+        on_item_completed=lambda event: calls.append(
+            ("item_completed", event.item.type)
+        ),
         on_item=lambda item: calls.append(("item", item.type)),
-        on_item_type={"agent_message": lambda item: calls.append(("item_type", item.type))},
+        on_item_type={
+            "agent_message": lambda item: calls.append(("item_type", item.type))
+        },
         on_error=lambda event: calls.append(("error", event.type)),
     )
 
