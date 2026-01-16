@@ -81,7 +81,7 @@ target/
 # IPython
 profile_default/
 ipython_config.py
-
+.ruff_cache
 # pyenv
 .python-version
 codex-sdk-sync.skill
