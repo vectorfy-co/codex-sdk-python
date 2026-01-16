@@ -27,7 +27,7 @@ from typing import (
 from .abort import AbortSignal
 from .config_overrides import encode_config_overrides
 from .exceptions import CodexAbortError, CodexCLIError, CodexError
-from .options import ApprovalMode, ModelReasoningEffort, SandboxMode
+from .options import ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode
 from .telemetry import span
 
 INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE"
@@ -52,6 +52,7 @@ class CodexExecArgs:
     output_schema_file: Optional[str] = None
     model_reasoning_effort: Optional[ModelReasoningEffort] = None
     network_access_enabled: Optional[bool] = None
+    web_search_mode: Optional[WebSearchMode] = None
     web_search_enabled: Optional[bool] = None
     web_search_cached_enabled: Optional[bool] = None
     skills_enabled: Optional[bool] = None
@@ -215,17 +216,21 @@ class CodexExec:
                 ["--config", f"sandbox_workspace_write.network_access={enabled_str}"]
             )
 
-        if args.web_search_enabled is not None:
-            enabled_str = "true" if args.web_search_enabled else "false"
-            command_args.extend(
-                ["--config", f"features.web_search_request={enabled_str}"]
-            )
-
-        if args.web_search_cached_enabled is not None:
-            enabled_str = "true" if args.web_search_cached_enabled else "false"
-            command_args.extend(
-                ["--config", f"features.web_search_cached={enabled_str}"]
-            )
+        if args.web_search_mode is not None:
+            command_args.extend(["--config", f'web_search="{args.web_search_mode}"'])
+        else:
+            mode = None
+            if args.web_search_cached_enabled is True:
+                mode = "cached"
+            elif args.web_search_enabled is True:
+                mode = "live"
+            elif (
+                args.web_search_enabled is False
+                or args.web_search_cached_enabled is False
+            ):
+                mode = "disabled"
+            if mode is not None:
+                command_args.extend(["--config", f'web_search="{mode}"'])
 
         if args.shell_snapshot_enabled is not None:
             enabled_str = "true" if args.shell_snapshot_enabled else "false"

@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 from base64 import b64encode
-from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import InitVar, asdict, dataclass, field, is_dataclass
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from ..codex import Codex
 from ..options import CodexOptions, ThreadOptions
@@ -23,14 +25,16 @@ from ..telemetry import span
 from ..thread import TurnOptions
 
 try:
+    from pydantic_ai import RunContext
     from pydantic_ai.messages import (
         ModelMessage,
         ModelRequest,
         ModelResponse,
+        ModelResponseStreamEvent,
         TextPart,
         ToolCallPart,
     )
-    from pydantic_ai.models import Model, ModelRequestParameters
+    from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
     from pydantic_ai.profiles import ModelProfile, ModelProfileSpec
     from pydantic_ai.settings import ModelSettings
     from pydantic_ai.tools import ToolDefinition
@@ -112,11 +116,20 @@ def _render_tool_definitions(
             lines.append(f"- {tool.name}")
             if tool.description:
                 lines.append(f"  description: {tool.description}")
+            lines.append(f"  kind: {tool.kind}")
             lines.append(
                 f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
             )
+            if tool.outer_typed_dict_key:
+                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
+            if tool.strict is not None:
+                lines.append(f"  strict: {str(tool.strict).lower()}")
             if tool.sequential:
                 lines.append("  sequential: true")
+            if tool.metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
+            if tool.timeout is not None:
+                lines.append(f"  timeout: {tool.timeout}")
 
     if output_tools:
         if lines:
@@ -128,11 +141,20 @@ def _render_tool_definitions(
             lines.append(f"- {tool.name}")
             if tool.description:
                 lines.append(f"  description: {tool.description}")
+            lines.append(f"  kind: {tool.kind}")
             lines.append(
                 f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
             )
+            if tool.outer_typed_dict_key:
+                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
+            if tool.strict is not None:
+                lines.append(f"  strict: {str(tool.strict).lower()}")
             if tool.sequential:
                 lines.append("  sequential: true")
+            if tool.metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
+            if tool.timeout is not None:
+                lines.append(f"  timeout: {tool.timeout}")
 
     return "\n".join(lines).strip()
 
@@ -239,6 +261,50 @@ def _render_message_history(messages: Sequence[ModelMessage]) -> str:
     return "\n\n".join([line for line in lines if line]).strip()
 
 
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass
+class CodexStreamedResponse(StreamedResponse):
+    """Minimal streamed response wrapper for Codex model provider."""
+
+    _model_name: str
+    _provider_name: str
+    _provider_url: Optional[str]
+    _parts: Sequence[Any]
+    _usage_init: InitVar[RequestUsage]
+    _timestamp: datetime = field(default_factory=_now_utc, init=False)
+
+    def __post_init__(self, _usage_init: RequestUsage) -> None:
+        self._usage = _usage_init
+
+    async def _get_event_iterator(
+        self,
+    ) -> AsyncIterator[ModelResponseStreamEvent]:
+        for index, part in enumerate(self._parts):
+            yield self._parts_manager.handle_part(
+                vendor_part_id=index,
+                part=part,
+            )
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider_name
+
+    @property
+    def provider_url(self) -> Optional[str]:
+        return self._provider_url
+
+    @property
+    def timestamp(self) -> datetime:
+        return self._timestamp
+
+
 class CodexModel(Model):
     """Use Codex CLI as a PydanticAI model provider via structured output."""
 
@@ -264,8 +330,12 @@ class CodexModel(Model):
             thread_options.sandbox_mode = "read-only"
         if thread_options.approval_policy is None:
             thread_options.approval_policy = "never"
-        if thread_options.web_search_enabled is None:
-            thread_options.web_search_enabled = False
+        if (
+            thread_options.web_search_mode is None
+            and thread_options.web_search_enabled is None
+            and thread_options.web_search_cached_enabled is None
+        ):
+            thread_options.web_search_mode = "disabled"
         if thread_options.network_access_enabled is None:
             thread_options.network_access_enabled = False
 
@@ -285,12 +355,12 @@ class CodexModel(Model):
     def system(self) -> str:
         return self._system
 
-    async def request(
+    async def _run_codex_request(
         self,
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-    ) -> ModelResponse:
+    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
         model_settings, model_request_parameters = self.prepare_request(
             model_settings,
             model_request_parameters,
@@ -372,10 +442,50 @@ class CodexModel(Model):
             if allow_text_output and final:
                 parts.append(TextPart(final))
 
+        thread_id = thread.id
+        assert thread_id is not None
+        return parts, usage, thread_id, model_request_parameters
+
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: Optional[ModelSettings],
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        parts, usage, thread_id, _ = await self._run_codex_request(
+            messages,
+            model_settings,
+            model_request_parameters,
+        )
         return ModelResponse(
             parts=parts,
             usage=usage,
             model_name=self.model_name,
             provider_name="codex",
-            provider_details={"thread_id": thread.id},
+            provider_details={"thread_id": thread_id},
         )
+
+    @asynccontextmanager
+    async def request_stream(
+        self,
+        messages: list[ModelMessage],
+        model_settings: Optional[ModelSettings],
+        model_request_parameters: ModelRequestParameters,
+        run_context: Optional[RunContext[Any]] = None,
+    ) -> AsyncIterator[StreamedResponse]:
+        del run_context
+        parts, usage, thread_id, prepared_params = await self._run_codex_request(
+            messages,
+            model_settings,
+            model_request_parameters,
+        )
+        streamed = CodexStreamedResponse(
+            model_request_parameters=prepared_params,
+            _model_name=self.model_name,
+            _provider_name="codex",
+            _provider_url=None,
+            _parts=parts,
+            _usage_init=usage,
+        )
+        streamed.provider_details = {"thread_id": thread_id}
+        yield streamed
