@@ -306,8 +306,7 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert "--config" in cmd_list
     assert 'model_reasoning_effort="high"' in cmd_list
     assert "sandbox_workspace_write.network_access=true" in cmd_list
-    assert "features.web_search_request=false" in cmd_list
-    assert "features.web_search_cached=true" in cmd_list
+    assert 'web_search="cached"' in cmd_list
     assert "features.shell_snapshot=true" in cmd_list
     assert "features.unified_exec=false" in cmd_list
     assert "features.apply_patch_freeform=true" in cmd_list
@@ -325,6 +324,31 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         cmd_list[i + 1] for i, v in enumerate(cmd_list[:-1]) if v == "--image"
     ]
     assert image_values == ["/tmp/one.png", "/tmp/two.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_exec_prefers_web_search_mode(monkeypatch: pytest.MonkeyPatch):
+    captured: Dict[str, Any] = {}
+
+    async def fake_spawn(*cmd: Any, **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = list(cmd)
+        return FakeProcess([], [], 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(
+        input="hello",
+        web_search_mode="live",
+        web_search_enabled=False,
+        web_search_cached_enabled=True,
+    )
+
+    async for _ in exec.run(args):
+        pass
+
+    cmd_list = captured["cmd"]
+    assert 'web_search="live"' in cmd_list
 
 
 @pytest.mark.asyncio
@@ -350,8 +374,7 @@ async def test_exec_omits_optional_feature_flags_when_unset(
         "features.skills" not in arg
         and "features.shell_snapshot" not in arg
         and "features.unified_exec" not in arg
-        and "features.web_search_request" not in arg
-        and "features.web_search_cached" not in arg
+        and "web_search=" not in arg
         and "features.apply_patch_freeform" not in arg
         and "features.exec_policy" not in arg
         and "features.remote_models" not in arg
@@ -374,16 +397,16 @@ async def test_exec_applies_feature_overrides(monkeypatch: pytest.MonkeyPatch):
     exec = CodexExec("codex-binary")
     args = CodexExecArgs(
         input="hello",
-        feature_overrides={"web_search_cached": True, "powershell_utf8": True},
-        web_search_cached_enabled=False,
+        feature_overrides={"remote_models": True, "powershell_utf8": True},
+        remote_models_enabled=False,
     )
 
     async for _ in exec.run(args):
         pass
 
     cmd_list = captured["cmd"]
-    override_key = "features.web_search_cached=true"
-    explicit_key = "features.web_search_cached=false"
+    override_key = "features.remote_models=true"
+    explicit_key = "features.remote_models=false"
     assert "features.powershell_utf8=true" in cmd_list
     assert override_key in cmd_list
     assert explicit_key in cmd_list

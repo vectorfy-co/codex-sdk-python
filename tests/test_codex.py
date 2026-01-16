@@ -300,6 +300,7 @@ class TestOptions:
             skip_git_repo_check=True,
             model_reasoning_effort="high",
             network_access_enabled=True,
+            web_search_mode="cached",
             web_search_enabled=False,
             web_search_cached_enabled=True,
             skills_enabled=True,
@@ -320,6 +321,7 @@ class TestOptions:
         assert options.skip_git_repo_check is True
         assert options.model_reasoning_effort == "high"
         assert options.network_access_enabled is True
+        assert options.web_search_mode == "cached"
         assert options.web_search_enabled is False
         assert options.web_search_cached_enabled is True
         assert options.skills_enabled is True

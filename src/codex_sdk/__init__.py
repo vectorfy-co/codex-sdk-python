@@ -64,6 +64,7 @@ from .options import (
     SandboxMode,
     ThreadOptions,
     TurnOptions,
+    WebSearchMode,
 )
 from .thread import (
     Input,
@@ -75,7 +76,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.81.0"
+__version__ = "0.85.0"
 
 __all__ = [
     "AbortController",
@@ -131,6 +132,7 @@ __all__ = [
     "ApprovalMode",
     "SandboxMode",
     "ModelReasoningEffort",
+    "WebSearchMode",
     "CodexError",
     "CodexAbortError",
     "CodexAppServerError",
