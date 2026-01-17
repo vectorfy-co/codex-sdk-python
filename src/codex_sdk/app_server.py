@@ -793,9 +793,22 @@ class AppServerClient:
         )
 
 
-class AppServerTextInput(TypedDict):
+class AppServerByteRange(TypedDict):
+    start: int
+    end: int
+
+
+class AppServerTextElement(TypedDict, total=False):
+    byte_range: AppServerByteRange
+    byteRange: AppServerByteRange
+    placeholder: Optional[str]
+
+
+class AppServerTextInput(TypedDict, total=False):
     type: str
     text: str
+    text_elements: List[AppServerTextElement]
+    textElements: List[AppServerTextElement]
 
 
 class AppServerImageInput(TypedDict):
@@ -837,6 +850,8 @@ def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
         if item_type == "local_image":
             item["type"] = "localImage"
             item_type = "localImage"
+        if item_type == "text":
+            _normalize_text_elements(item)
         if item_type == "localImage" and isinstance(item.get("path"), Path):
             item["path"] = str(item["path"])
         if item_type == "skill" and isinstance(item.get("path"), Path):
@@ -844,6 +859,29 @@ def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
         items.append(item)
 
     return items
+
+
+def _normalize_text_elements(item: Dict[str, Any]) -> None:
+    elements = None
+    if isinstance(item.get("textElements"), list):
+        elements = item.get("textElements")
+    elif isinstance(item.get("text_elements"), list):
+        elements = item.pop("text_elements")
+
+    if elements is None:
+        return
+
+    normalized: List[Any] = []
+    for element in elements:
+        if isinstance(element, Mapping):
+            entry = dict(element)
+            if "byte_range" in entry and "byteRange" not in entry:
+                entry["byteRange"] = entry.pop("byte_range")
+            normalized.append(entry)
+        else:
+            normalized.append(element)
+
+    item["textElements"] = normalized
 
 
 def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
