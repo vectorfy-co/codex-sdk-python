@@ -2,6 +2,24 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## 0.87.0 (2026-01-17)
+
+### Added
+- App-server input normalization now accepts `text_elements`/`byte_range` for text items and
+  converts them to camelCase (`textElements`/`byteRange`) for the JSON-RPC protocol.
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.87.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.87.0 to match Codex CLI release.
+- README updated with app-server text element input normalization notes.
+
+### Notes
+- Codex 0.87.0 round-trips user message text element metadata (byte ranges) through the
+  protocol/app-server/core stack.
+- MCP `CallToolResult` now includes `threadId` in both `content` and `structuredContent`.
+- Collaboration wait calls can block on multiple receiver IDs.
+- Piped non-PTY commands no longer hang waiting on stdin; shell commands run under user snapshots.
+
 ## 0.86.0 (2026-01-16)
 
 ### Added

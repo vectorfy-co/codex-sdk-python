@@ -284,6 +284,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+Text inputs may include `textElements` with `byteRange` to preserve UI annotations in history.
+The SDK also accepts `text_elements`/`byte_range` and normalizes them to camelCase.
+
 Codex 0.86.0+ supports optional `SKILL.toml` metadata alongside `SKILL.md`. When present,
 `skills_list` responses include an `interface` object (display name, icons, brand color,
 default prompt) for richer UI integrations.
