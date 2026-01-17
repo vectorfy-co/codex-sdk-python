@@ -76,7 +76,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.86.0"
+__version__ = "0.87.0"
 
 __all__ = [
     "AbortController",
