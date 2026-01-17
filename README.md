@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.85.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.86.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -283,6 +283,10 @@ async def main() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+Codex 0.86.0+ supports optional `SKILL.toml` metadata alongside `SKILL.md`. When present,
+`skills_list` responses include an `interface` object (display name, icons, brand color,
+default prompt) for richer UI integrations.
 
 #### App-server convenience methods
 

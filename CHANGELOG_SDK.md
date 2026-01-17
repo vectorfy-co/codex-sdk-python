@@ -2,6 +2,21 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## 0.86.0 (2026-01-16)
+
+### Added
+- App-server `skills_list` now returns optional `interface` metadata when provided by
+  `SKILL.toml` (display name, icons, brand color, default prompt).
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.86.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.86.0 to match Codex CLI release.
+
+### Notes
+- Codex 0.86.0 can explicitly disable web search and advertises eligibility via a header.
+- MCP elicitation accept now sends an empty JSON payload instead of null for stricter servers.
+- Unified exec cleans up background processes to avoid late End events after listeners stop.
+
 ## 0.85.0 (2026-01-15)
 
 ### Added
