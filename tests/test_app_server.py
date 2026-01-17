@@ -387,6 +387,43 @@ def test_app_server_helpers() -> None:
     assert normalize_app_server_input([{"type": "text", "text": "ok"}]) == [
         {"type": "text", "text": "ok"}
     ]
+    assert normalize_app_server_input(
+        [
+            {
+                "type": "text",
+                "text": "ok",
+                "text_elements": [
+                    {
+                        "byte_range": {"start": 0, "end": 2},
+                        "placeholder": "link",
+                    }
+                ],
+            }
+        ]
+    ) == [
+        {
+            "type": "text",
+            "text": "ok",
+            "textElements": [
+                {"byteRange": {"start": 0, "end": 2}, "placeholder": "link"}
+            ],
+        }
+    ]
+    assert normalize_app_server_input(
+        [
+            {
+                "type": "text",
+                "text": "ok",
+                "textElements": [{"byteRange": {"start": 1, "end": 3}}],
+            }
+        ]
+    ) == [
+        {
+            "type": "text",
+            "text": "ok",
+            "textElements": [{"byteRange": {"start": 1, "end": 3}}],
+        }
+    ]
 
     with pytest.raises(CodexError):
         normalize_app_server_input(["bad"])  # type: ignore[list-item]

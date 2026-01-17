@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "codex-sdk-python"
-version = "0.86.0"
+version = "0.87.0"
 description = "Python SDK for the Codex CLI agent with async threads, streaming events, and structured outputs"
 readme = "README.md"
 license = {text = "Apache-2.0"}
