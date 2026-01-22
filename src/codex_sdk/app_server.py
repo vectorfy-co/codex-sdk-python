@@ -614,6 +614,9 @@ class AppServerClient:
             params["limit"] = limit
         return await self._request_dict("model/list", params or None)
 
+    async def collaboration_mode_list(self) -> Dict[str, Any]:
+        return await self._request_dict("collaborationMode/list", {})
+
     async def command_exec(
         self,
         *,

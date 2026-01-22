@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Literal, Mapping, Optional
+from pathlib import Path
+from typing import Any, List, Literal, Mapping, Optional, Union
 
 from .abort import AbortSignal
 
@@ -13,6 +14,7 @@ SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 
 ModelReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
 WebSearchMode = Literal["disabled", "cached", "live"]
+ModelPersonality = Literal["friendly", "pragmatic"]
 
 
 @dataclass
@@ -55,6 +57,9 @@ class ThreadOptions:
         working_directory: Working directory for the thread.
         skip_git_repo_check: Skip Git repository safety check.
         model_reasoning_effort: Model reasoning effort preset.
+        model_instructions_file: Optional path to a file containing model instructions.
+        model_personality: Optional personality preset for the model.
+        max_threads: Maximum number of concurrent threads allowed by the agent.
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_mode: Web search mode ("disabled", "cached", or "live").
         web_search_enabled: Enable/disable web search feature.
@@ -65,6 +70,8 @@ class ThreadOptions:
         apply_patch_freeform_enabled: Enable/disable freeform apply_patch tool.
         exec_policy_enabled: Enable/disable exec policy enforcement.
         remote_models_enabled: Enable/disable remote model list refresh.
+        collaboration_modes_enabled: Enable/disable collaboration mode tooling.
+        responses_websockets_enabled: Enable/disable responses websocket transport.
         request_compression_enabled: Enable/disable request body compression.
         feature_overrides: Arbitrary feature flag overrides (key -> bool).
         approval_policy: Approval policy for tool execution.
@@ -87,6 +94,15 @@ class ThreadOptions:
 
     # Model reasoning effort preset
     model_reasoning_effort: Optional[ModelReasoningEffort] = None
+
+    # Optional path to a file containing model instructions
+    model_instructions_file: Optional[Union[str, Path]] = None
+
+    # Optional personality preset for the model
+    model_personality: Optional[ModelPersonality] = None
+
+    # Maximum number of concurrent threads allowed by the agent
+    max_threads: Optional[int] = None
 
     # Enable/disable network access in workspace-write sandbox
     network_access_enabled: Optional[bool] = None
@@ -117,6 +133,12 @@ class ThreadOptions:
 
     # Enable/disable remote model list refresh
     remote_models_enabled: Optional[bool] = None
+
+    # Enable/disable collaboration mode tooling
+    collaboration_modes_enabled: Optional[bool] = None
+
+    # Enable/disable responses websocket transport
+    responses_websockets_enabled: Optional[bool] = None
 
     # Enable/disable request body compression
     request_compression_enabled: Optional[bool] = None

@@ -317,6 +317,10 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "model/list", {"data": []})
     assert payload["params"] == {"cursor": "m", "limit": 1}
 
+    task = asyncio.create_task(client.collaboration_mode_list())
+    _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
+    assert payload["params"] == {}
+
     task = asyncio.create_task(
         client.command_exec(command=["echo", "hi"], timeout_ms=10, cwd=tmp_path)
     )
