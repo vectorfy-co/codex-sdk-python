@@ -2,6 +2,24 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## 0.88.0 (2026-01-22)
+
+### Added
+- Thread options for `model_instructions_file`, `model_personality`, `max_threads`,
+  `collaboration_modes_enabled`, and `responses_websockets_enabled`.
+- App-server helper for `collaborationMode/list` to fetch collaboration mode presets.
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.88.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.88.0 to match Codex CLI release.
+- README updated with new ThreadOptions mappings and collaboration mode list helper.
+
+### Notes
+- Codex 0.88.0 adds device-code auth as a headless fallback and tightens config loading to
+  trusted folders (including symlink resolution).
+- Collaboration modes/presets, request-user-input tooling, and model personality/instruction
+  file config landed in the CLI/core stack.
+
 ## 0.87.0 (2026-01-17)
 
 ### Added

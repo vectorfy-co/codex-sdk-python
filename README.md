@@ -208,6 +208,9 @@ ThreadOptions(
     working_directory="/path/to/project",
     skip_git_repo_check=True,
     model_reasoning_effort="high",
+    model_instructions_file="/path/to/instructions.md",
+    model_personality="friendly",
+    max_threads=4,
     network_access_enabled=True,
     web_search_mode="cached",
     shell_snapshot_enabled=True,
@@ -215,6 +218,8 @@ ThreadOptions(
     apply_patch_freeform_enabled=False,
     exec_policy_enabled=True,
     remote_models_enabled=False,
+    collaboration_modes_enabled=True,
+    responses_websockets_enabled=True,
     request_compression_enabled=True,
     approval_policy="on-request",
     additional_directories=["../shared"],
@@ -228,6 +233,9 @@ Important mappings to the Codex CLI:
 - `additional_directories` maps to repeated `--add-dir`.
 - `skip_git_repo_check` maps to `--skip-git-repo-check`.
 - `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
+- `model_instructions_file` maps to `--config model_instructions_file=...`.
+- `model_personality` maps to `--config model_personality=...`.
+- `max_threads` maps to `--config agents.max_threads=...`.
 - `network_access_enabled` maps to `--config sandbox_workspace_write.network_access=...`.
 - `web_search_mode` maps to `--config web_search="disabled|cached|live"`.
 - `web_search_enabled`/`web_search_cached_enabled` map to `--config web_search=...` for legacy
@@ -237,12 +245,16 @@ Important mappings to the Codex CLI:
 - `apply_patch_freeform_enabled` maps to `--config features.apply_patch_freeform=...`.
 - `exec_policy_enabled` maps to `--config features.exec_policy=...`.
 - `remote_models_enabled` maps to `--config features.remote_models=...`.
+- `collaboration_modes_enabled` maps to `--config features.collaboration_modes=...`.
+- `responses_websockets_enabled` maps to `--config features.responses_websockets=...`.
 - `request_compression_enabled` maps to `--config features.enable_request_compression=...`.
 - `feature_overrides` maps to `--config features.<key>=...` (explicit options take precedence).
 - `approval_policy` maps to `--config approval_policy=...`.
 - `config_overrides` maps to repeated `--config key=value` entries.
 
 Note: `skills_enabled` is deprecated in Codex 0.80+ (skills are always enabled).
+Note: Codex 0.88.0+ ignores `experimental_instructions_file`; use
+`model_instructions_file` instead.
 
 Feature overrides example:
 
@@ -300,6 +312,7 @@ The SDK also exposes helpers for most app-server endpoints:
 - Skills: `skills_list`
 - Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`
+- Collaboration modes: `collaboration_mode_list`
 - One-off commands: `command_exec`
 - MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
 - Account: `account_login_start`, `account_login_cancel`, `account_logout`,
