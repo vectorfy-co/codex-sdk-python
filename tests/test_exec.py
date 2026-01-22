@@ -270,7 +270,9 @@ async def test_exec_aborts_when_signal_already_aborted(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyPatch):
+async def test_exec_passes_config_and_repeated_flags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     monkeypatch.setenv("CODEX_API_KEY", "token")
     captured: Dict[str, Any] = {}
 
@@ -281,9 +283,13 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
     exec = CodexExec("codex-binary")
+    instructions_path = tmp_path / "instructions.md"
     args = CodexExecArgs(
         input="hello",
         model_reasoning_effort="high",
+        model_instructions_file=instructions_path,
+        model_personality="pragmatic",
+        max_threads=5,
         network_access_enabled=True,
         web_search_enabled=False,
         web_search_cached_enabled=True,
@@ -292,6 +298,8 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
         apply_patch_freeform_enabled=True,
         exec_policy_enabled=False,
         remote_models_enabled=True,
+        collaboration_modes_enabled=True,
+        responses_websockets_enabled=False,
         request_compression_enabled=False,
         approval_policy="on-request",
         additional_directories=["../backend", "/tmp/shared"],
@@ -305,6 +313,9 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert cmd_list[:2] == ["codex-binary", "exec"]
     assert "--config" in cmd_list
     assert 'model_reasoning_effort="high"' in cmd_list
+    assert f'model_instructions_file="{instructions_path}"' in cmd_list
+    assert 'model_personality="pragmatic"' in cmd_list
+    assert "agents.max_threads=5" in cmd_list
     assert "sandbox_workspace_write.network_access=true" in cmd_list
     assert 'web_search="cached"' in cmd_list
     assert "features.shell_snapshot=true" in cmd_list
@@ -312,6 +323,8 @@ async def test_exec_passes_config_and_repeated_flags(monkeypatch: pytest.MonkeyP
     assert "features.apply_patch_freeform=true" in cmd_list
     assert "features.exec_policy=false" in cmd_list
     assert "features.remote_models=true" in cmd_list
+    assert "features.collaboration_modes=true" in cmd_list
+    assert "features.responses_websockets=false" in cmd_list
     assert "features.enable_request_compression=false" in cmd_list
     assert 'approval_policy="on-request"' in cmd_list
 
@@ -378,7 +391,12 @@ async def test_exec_omits_optional_feature_flags_when_unset(
         and "features.apply_patch_freeform" not in arg
         and "features.exec_policy" not in arg
         and "features.remote_models" not in arg
+        and "features.collaboration_modes" not in arg
+        and "features.responses_websockets" not in arg
         and "features.enable_request_compression" not in arg
+        and "model_instructions_file" not in arg
+        and "model_personality" not in arg
+        and "agents.max_threads" not in arg
         for arg in cmd_list
         if isinstance(arg, str)
     )

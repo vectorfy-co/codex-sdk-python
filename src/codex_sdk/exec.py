@@ -27,7 +27,13 @@ from typing import (
 from .abort import AbortSignal
 from .config_overrides import encode_config_overrides
 from .exceptions import CodexAbortError, CodexCLIError, CodexError
-from .options import ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode
+from .options import (
+    ApprovalMode,
+    ModelPersonality,
+    ModelReasoningEffort,
+    SandboxMode,
+    WebSearchMode,
+)
 from .telemetry import span
 
 INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE"
@@ -51,6 +57,9 @@ class CodexExecArgs:
     skip_git_repo_check: Optional[bool] = None
     output_schema_file: Optional[str] = None
     model_reasoning_effort: Optional[ModelReasoningEffort] = None
+    model_instructions_file: Optional[Union[str, Path]] = None
+    model_personality: Optional[ModelPersonality] = None
+    max_threads: Optional[int] = None
     network_access_enabled: Optional[bool] = None
     web_search_mode: Optional[WebSearchMode] = None
     web_search_enabled: Optional[bool] = None
@@ -61,6 +70,8 @@ class CodexExecArgs:
     apply_patch_freeform_enabled: Optional[bool] = None
     exec_policy_enabled: Optional[bool] = None
     remote_models_enabled: Optional[bool] = None
+    collaboration_modes_enabled: Optional[bool] = None
+    responses_websockets_enabled: Optional[bool] = None
     request_compression_enabled: Optional[bool] = None
     feature_overrides: Optional[Mapping[str, bool]] = None
     approval_policy: Optional[ApprovalMode] = None
@@ -199,6 +210,23 @@ class CodexExec:
                 ["--config", f'model_reasoning_effort="{args.model_reasoning_effort}"']
             )
 
+        if args.model_instructions_file:
+            instructions_path = str(args.model_instructions_file)
+            command_args.extend(
+                [
+                    "--config",
+                    f"model_instructions_file={json.dumps(instructions_path)}",
+                ]
+            )
+
+        if args.model_personality:
+            command_args.extend(
+                ["--config", f'model_personality="{args.model_personality}"']
+            )
+
+        if args.max_threads is not None:
+            command_args.extend(["--config", f"agents.max_threads={args.max_threads}"])
+
         if args.feature_overrides:
             for key in sorted(args.feature_overrides):
                 enabled = args.feature_overrides[key]
@@ -253,6 +281,18 @@ class CodexExec:
         if args.remote_models_enabled is not None:
             enabled_str = "true" if args.remote_models_enabled else "false"
             command_args.extend(["--config", f"features.remote_models={enabled_str}"])
+
+        if args.collaboration_modes_enabled is not None:
+            enabled_str = "true" if args.collaboration_modes_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.collaboration_modes={enabled_str}"]
+            )
+
+        if args.responses_websockets_enabled is not None:
+            enabled_str = "true" if args.responses_websockets_enabled else "false"
+            command_args.extend(
+                ["--config", f"features.responses_websockets={enabled_str}"]
+            )
 
         if args.request_compression_enabled is not None:
             enabled_str = "true" if args.request_compression_enabled else "false"

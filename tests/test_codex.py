@@ -299,6 +299,9 @@ class TestOptions:
             working_directory="/tmp",
             skip_git_repo_check=True,
             model_reasoning_effort="high",
+            model_instructions_file="/tmp/instructions.md",
+            model_personality="friendly",
+            max_threads=3,
             network_access_enabled=True,
             web_search_mode="cached",
             web_search_enabled=False,
@@ -309,6 +312,8 @@ class TestOptions:
             apply_patch_freeform_enabled=True,
             exec_policy_enabled=False,
             remote_models_enabled=True,
+            collaboration_modes_enabled=False,
+            responses_websockets_enabled=True,
             request_compression_enabled=True,
             feature_overrides={"web_search_cached": False},
             approval_policy="on-request",
@@ -320,6 +325,9 @@ class TestOptions:
         assert options.working_directory == "/tmp"
         assert options.skip_git_repo_check is True
         assert options.model_reasoning_effort == "high"
+        assert options.model_instructions_file == "/tmp/instructions.md"
+        assert options.model_personality == "friendly"
+        assert options.max_threads == 3
         assert options.network_access_enabled is True
         assert options.web_search_mode == "cached"
         assert options.web_search_enabled is False
@@ -330,6 +338,8 @@ class TestOptions:
         assert options.apply_patch_freeform_enabled is True
         assert options.exec_policy_enabled is False
         assert options.remote_models_enabled is True
+        assert options.collaboration_modes_enabled is False
+        assert options.responses_websockets_enabled is True
         assert options.request_compression_enabled is True
         assert options.feature_overrides == {"web_search_cached": False}
         assert options.approval_policy == "on-request"
