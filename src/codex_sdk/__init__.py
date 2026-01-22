@@ -60,6 +60,7 @@ from .items import (
 from .options import (
     ApprovalMode,
     CodexOptions,
+    ModelPersonality,
     ModelReasoningEffort,
     SandboxMode,
     ThreadOptions,
@@ -76,7 +77,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.87.0"
+__version__ = "0.88.0"
 
 __all__ = [
     "AbortController",
@@ -132,6 +133,7 @@ __all__ = [
     "ApprovalMode",
     "SandboxMode",
     "ModelReasoningEffort",
+    "ModelPersonality",
     "WebSearchMode",
     "CodexError",
     "CodexAbortError",
