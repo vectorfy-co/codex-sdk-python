@@ -307,7 +307,7 @@ default prompt) for richer UI integrations.
 
 The SDK also exposes helpers for most app-server endpoints:
 
-- Threads: `thread_list`, `thread_archive`, `thread_rollback`, `thread_loaded_list`
+- Threads: `thread_list`, `thread_read`, `thread_archive`, `thread_rollback`, `thread_loaded_list`
 - Config: `config_read`, `config_value_write`, `config_batch_write`, `config_requirements_read`
 - Skills: `skills_list`
 - Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
@@ -321,6 +321,9 @@ The SDK also exposes helpers for most app-server endpoints:
 
 These map 1:1 to the Codex app-server protocol; see `codex/codex-rs/app-server/README.md`
 for payload shapes and event semantics.
+
+`thread_list` supports an `archived` filter, and `config_read` accepts an optional `cwd`
+to compute the effective layered config for a specific working directory.
 
 ### Observability (OTEL) and notify
 
