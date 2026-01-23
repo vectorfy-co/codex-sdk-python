@@ -256,12 +256,19 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"] == {"threadId": "t1", "turnId": "turn_1"}
 
     task = asyncio.create_task(
-        client.thread_list(cursor="c2", limit=2, model_providers=["openai"])
+        client.thread_list(
+            cursor="c2", limit=2, model_providers=["openai"], archived=True
+        )
     )
     _, payload = await expect_request(
         task, "thread/list", {"data": [], "nextCursor": None}
     )
     assert payload["params"]["modelProviders"] == ["openai"]
+    assert payload["params"]["archived"] is True
+
+    task = asyncio.create_task(client.thread_read("t1", include_turns=True))
+    _, payload = await expect_request(task, "thread/read", {"thread": {"id": "t1"}})
+    assert payload["params"] == {"threadId": "t1", "includeTurns": True}
 
     task = asyncio.create_task(client.thread_archive("t1"))
     _, payload = await expect_request(task, "thread/archive", {})
@@ -271,11 +278,11 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "thread/rollback", {"thread": {"id": "t1"}})
     assert payload["params"] == {"threadId": "t1", "numTurns": 2}
 
-    task = asyncio.create_task(client.config_read(include_layers=True))
+    task = asyncio.create_task(client.config_read(include_layers=True, cwd=tmp_path))
     _, payload = await expect_request(
         task, "config/read", {"config": {}, "origins": {}}
     )
-    assert payload["params"] == {"includeLayers": True}
+    assert payload["params"] == {"includeLayers": True, "cwd": str(tmp_path)}
 
     task = asyncio.create_task(
         client.config_value_write(

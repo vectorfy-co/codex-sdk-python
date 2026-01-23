@@ -481,6 +481,7 @@ class AppServerClient:
         cursor: Optional[str] = None,
         limit: Optional[int] = None,
         model_providers: Optional[Sequence[str]] = None,
+        archived: Optional[bool] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
         if cursor is not None:
@@ -489,7 +490,15 @@ class AppServerClient:
             params["limit"] = limit
         if model_providers is not None:
             params["model_providers"] = list(model_providers)
+        if archived is not None:
+            params["archived"] = archived
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
+
+    async def thread_read(
+        self, thread_id: str, *, include_turns: bool = False
+    ) -> Dict[str, Any]:
+        payload = {"thread_id": thread_id, "include_turns": include_turns}
+        return await self._request_dict("thread/read", _coerce_keys(payload))
 
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
         return await self._request_dict("thread/archive", {"threadId": thread_id})
@@ -504,8 +513,16 @@ class AppServerClient:
     async def config_requirements_read(self) -> Dict[str, Any]:
         return await self._request_dict("configRequirements/read")
 
-    async def config_read(self, *, include_layers: bool = False) -> Dict[str, Any]:
-        params = {"include_layers": include_layers}
+    async def config_read(
+        self,
+        *,
+        include_layers: bool = False,
+        cwd: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        params = {
+            "include_layers": include_layers,
+            "cwd": str(cwd) if cwd is not None else None,
+        }
         return await self._request_dict("config/read", _coerce_keys(params))
 
     async def config_value_write(
