@@ -2,7 +2,22 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## 0.88.0 (2026-01-22)
+## [0.89.0] - 2026-01-22
+
+### Added
+- App-server helper for `thread_read` (supports `include_turns`).
+- `thread_list` now accepts an `archived` filter.
+- `config_read` accepts an optional `cwd` for layered config resolution.
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.89.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.89.0 to match Codex CLI release.
+
+### Notes
+- Codex 0.89.0 adds `/permissions`, skill enable/disable UI, and app-server support for
+  `thread/read` and layered `config/read`.
+
+## [0.88.0] - 2026-01-22
 
 ### Added
 - Thread options for `model_instructions_file`, `model_personality`, `max_threads`,
@@ -20,7 +35,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - Collaboration modes/presets, request-user-input tooling, and model personality/instruction
   file config landed in the CLI/core stack.
 
-## 0.87.0 (2026-01-17)
+## [0.87.0] - 2026-01-17
 
 ### Added
 - App-server input normalization now accepts `text_elements`/`byte_range` for text items and
@@ -38,7 +53,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - Collaboration wait calls can block on multiple receiver IDs.
 - Piped non-PTY commands no longer hang waiting on stdin; shell commands run under user snapshots.
 
-## 0.86.0 (2026-01-16)
+## [0.86.0] - 2026-01-16
 
 ### Added
 - App-server `skills_list` now returns optional `interface` metadata when provided by
@@ -53,7 +68,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - MCP elicitation accept now sends an empty JSON payload instead of null for stricter servers.
 - Unified exec cleans up background processes to avoid late End events after listeners stop.
 
-## 0.85.0 (2026-01-15)
+## [0.85.0] - 2026-01-15
 
 ### Added
 - `web_search_mode` thread option (`disabled`, `cached`, `live`) mapped to `--config web_search=...`.
@@ -75,7 +90,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - `codex resume --last` now respects the current working directory.
 - Stdin prompt decoding handles BOMs/UTF-16 with clearer errors.
 
-## 0.81.0 (2026-01-15)
+## [0.81.0] - 2026-01-15
 
 ### Added
 - App-server helper for `config/mcpServer/reload` to refresh MCP server config.
@@ -94,7 +109,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - Linux sandbox supports read-only bind mounts; app-server now emits `configWarning`
   notifications for config/rules parse errors.
 
-## 0.80.0 (2026-01-11)
+## [0.80.0] - 2026-01-11
 
 ### Added
 - App-server JSON-RPC client with initialize handshake, notifications, and request handling.
