@@ -3,6 +3,10 @@ import importlib
 
 import pytest
 
+pydantic = pytest.importorskip("pydantic")
+pytest.importorskip("pydantic_ai")
+BaseModel = pydantic.BaseModel
+
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
@@ -16,10 +20,6 @@ from codex_sdk.integrations.pydantic_ai_model import (
 )
 from codex_sdk.options import CodexOptions
 from codex_sdk.thread import ParsedTurn, Turn
-
-pydantic = pytest.importorskip("pydantic")
-pytest.importorskip("pydantic_ai")
-BaseModel = pydantic.BaseModel
 
 messages = importlib.import_module("pydantic_ai.messages")
 models = importlib.import_module("pydantic_ai.models")
