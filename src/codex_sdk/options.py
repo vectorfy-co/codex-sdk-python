@@ -59,7 +59,8 @@ class ThreadOptions:
         model_reasoning_effort: Model reasoning effort preset.
         model_instructions_file: Optional path to a file containing model instructions.
         model_personality: Optional personality preset for the model.
-        max_threads: Maximum number of concurrent threads allowed by the agent.
+        max_threads: Maximum number of concurrent threads allowed by the agent
+            (capped at 6 in Codex 0.91.0+).
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_mode: Web search mode ("disabled", "cached", or "live").
         web_search_enabled: Enable/disable web search feature.
@@ -71,6 +72,7 @@ class ThreadOptions:
         exec_policy_enabled: Enable/disable exec policy enforcement.
         remote_models_enabled: Enable/disable remote model list refresh.
         collaboration_modes_enabled: Enable/disable collaboration mode tooling.
+        connectors_enabled: Enable/disable connector tooling.
         responses_websockets_enabled: Enable/disable responses websocket transport.
         request_compression_enabled: Enable/disable request body compression.
         feature_overrides: Arbitrary feature flag overrides (key -> bool).
@@ -136,6 +138,9 @@ class ThreadOptions:
 
     # Enable/disable collaboration mode tooling
     collaboration_modes_enabled: Optional[bool] = None
+
+    # Enable/disable connector tooling
+    connectors_enabled: Optional[bool] = None
 
     # Enable/disable responses websocket transport
     responses_websockets_enabled: Optional[bool] = None

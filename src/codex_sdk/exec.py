@@ -71,6 +71,7 @@ class CodexExecArgs:
     exec_policy_enabled: Optional[bool] = None
     remote_models_enabled: Optional[bool] = None
     collaboration_modes_enabled: Optional[bool] = None
+    connectors_enabled: Optional[bool] = None
     responses_websockets_enabled: Optional[bool] = None
     request_compression_enabled: Optional[bool] = None
     feature_overrides: Optional[Mapping[str, bool]] = None
@@ -225,6 +226,11 @@ class CodexExec:
             )
 
         if args.max_threads is not None:
+            if args.max_threads > 6:
+                raise CodexError(
+                    "max_threads cannot exceed 6 in Codex 0.91.0+; "
+                    f"received {args.max_threads}."
+                )
             command_args.extend(["--config", f"agents.max_threads={args.max_threads}"])
 
         if args.feature_overrides:
@@ -287,6 +293,10 @@ class CodexExec:
             command_args.extend(
                 ["--config", f"features.collaboration_modes={enabled_str}"]
             )
+
+        if args.connectors_enabled is not None:
+            enabled_str = "true" if args.connectors_enabled else "false"
+            command_args.extend(["--config", f"features.connectors={enabled_str}"])
 
         if args.responses_websockets_enabled is not None:
             enabled_str = "true" if args.responses_websockets_enabled else "false"

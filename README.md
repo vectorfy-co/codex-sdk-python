@@ -219,6 +219,7 @@ ThreadOptions(
     exec_policy_enabled=True,
     remote_models_enabled=False,
     collaboration_modes_enabled=True,
+    connectors_enabled=True,
     responses_websockets_enabled=True,
     request_compression_enabled=True,
     approval_policy="on-request",
@@ -246,6 +247,7 @@ Important mappings to the Codex CLI:
 - `exec_policy_enabled` maps to `--config features.exec_policy=...`.
 - `remote_models_enabled` maps to `--config features.remote_models=...`.
 - `collaboration_modes_enabled` maps to `--config features.collaboration_modes=...`.
+- `connectors_enabled` maps to `--config features.connectors=...`.
 - `responses_websockets_enabled` maps to `--config features.responses_websockets=...`.
 - `request_compression_enabled` maps to `--config features.enable_request_compression=...`.
 - `feature_overrides` maps to `--config features.<key>=...` (explicit options take precedence).
@@ -253,6 +255,7 @@ Important mappings to the Codex CLI:
 - `config_overrides` maps to repeated `--config key=value` entries.
 
 Note: `skills_enabled` is deprecated in Codex 0.80+ (skills are always enabled).
+Note: Codex 0.91.0+ caps `max_threads` to 6.
 Note: Codex 0.88.0+ ignores `experimental_instructions_file`; use
 `model_instructions_file` instead.
 

@@ -290,6 +290,7 @@ class Thread:
                     exec_policy_enabled=self._thread_options.exec_policy_enabled,
                     remote_models_enabled=self._thread_options.remote_models_enabled,
                     collaboration_modes_enabled=self._thread_options.collaboration_modes_enabled,
+                    connectors_enabled=self._thread_options.connectors_enabled,
                     responses_websockets_enabled=self._thread_options.responses_websockets_enabled,
                     request_compression_enabled=self._thread_options.request_compression_enabled,
                     feature_overrides=self._thread_options.feature_overrides,
