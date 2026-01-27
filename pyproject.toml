@@ -37,7 +37,7 @@ pydantic = [
     "pydantic>=2",
 ]
 pydantic-ai = [
-    "pydantic-ai; python_version >= '3.10'",
+    "pydantic-ai>=1.47.0; python_version >= '3.10'",
 ]
 logfire = [
     "logfire>=4.20.0; python_version >= '3.9'",
@@ -49,7 +49,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0",
     "pydantic>=2",
-    "pydantic-ai; python_version >= '3.10'",
+    "pydantic-ai>=1.47.0; python_version >= '3.10'",
     "black>=22.0",
     "isort>=5.0",
     "mypy>=1.0",
