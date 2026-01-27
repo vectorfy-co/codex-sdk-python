@@ -299,6 +299,7 @@ async def test_exec_passes_config_and_repeated_flags(
         exec_policy_enabled=False,
         remote_models_enabled=True,
         collaboration_modes_enabled=True,
+        connectors_enabled=True,
         responses_websockets_enabled=False,
         request_compression_enabled=False,
         approval_policy="on-request",
@@ -324,6 +325,7 @@ async def test_exec_passes_config_and_repeated_flags(
     assert "features.exec_policy=false" in cmd_list
     assert "features.remote_models=true" in cmd_list
     assert "features.collaboration_modes=true" in cmd_list
+    assert "features.connectors=true" in cmd_list
     assert "features.responses_websockets=false" in cmd_list
     assert "features.enable_request_compression=false" in cmd_list
     assert 'approval_policy="on-request"' in cmd_list
@@ -392,6 +394,7 @@ async def test_exec_omits_optional_feature_flags_when_unset(
         and "features.exec_policy" not in arg
         and "features.remote_models" not in arg
         and "features.collaboration_modes" not in arg
+        and "features.connectors" not in arg
         and "features.responses_websockets" not in arg
         and "features.enable_request_compression" not in arg
         and "model_instructions_file" not in arg
@@ -400,6 +403,23 @@ async def test_exec_omits_optional_feature_flags_when_unset(
         for arg in cmd_list
         if isinstance(arg, str)
     )
+
+
+@pytest.mark.asyncio
+async def test_exec_rejects_max_threads_over_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        raise AssertionError("process should not spawn when max_threads is invalid")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", max_threads=7)
+
+    with pytest.raises(CodexError):
+        async for _ in exec.run(args):
+            pass
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,21 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.91.0] - 2026-01-27
+
+### Added
+- Thread option `connectors_enabled` to toggle `features.connectors`.
+- App-server helper `app_list` for `app/list`.
+
+### Updated
+- Enforced `max_threads` cap of 6 to match Codex 0.91.0 sub-agent limits.
+- Bundled Codex CLI vendor binaries updated to 0.91.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.91.0 to match Codex CLI release.
+
+### Notes
+- Codex 0.91.0 reduces the maximum number of sub-agents to 6 and adds app listings
+  in the app-server protocol.
+
 ## [0.89.0] - 2026-01-22
 
 ### Added

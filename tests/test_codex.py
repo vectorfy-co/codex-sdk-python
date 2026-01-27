@@ -313,6 +313,7 @@ class TestOptions:
             exec_policy_enabled=False,
             remote_models_enabled=True,
             collaboration_modes_enabled=False,
+            connectors_enabled=True,
             responses_websockets_enabled=True,
             request_compression_enabled=True,
             feature_overrides={"web_search_cached": False},
@@ -339,6 +340,7 @@ class TestOptions:
         assert options.exec_policy_enabled is False
         assert options.remote_models_enabled is True
         assert options.collaboration_modes_enabled is False
+        assert options.connectors_enabled is True
         assert options.responses_websockets_enabled is True
         assert options.request_compression_enabled is True
         assert options.feature_overrides == {"web_search_cached": False}
