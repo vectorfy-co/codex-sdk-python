@@ -286,6 +286,7 @@ async def test_exec_passes_config_and_repeated_flags(
     instructions_path = tmp_path / "instructions.md"
     args = CodexExecArgs(
         input="hello",
+        thread_id="thread-123",
         model_reasoning_effort="high",
         model_instructions_file=instructions_path,
         model_personality="pragmatic",
@@ -339,6 +340,10 @@ async def test_exec_passes_config_and_repeated_flags(
         cmd_list[i + 1] for i, v in enumerate(cmd_list[:-1]) if v == "--image"
     ]
     assert image_values == ["/tmp/one.png", "/tmp/two.jpg"]
+    # Resume args must come before `--image` flags (upstream 0.98.0+ parsing).
+    resume_index = cmd_list.index("resume")
+    assert cmd_list[resume_index + 1] == "thread-123"
+    assert resume_index < cmd_list.index("--image")
 
 
 @pytest.mark.asyncio
@@ -406,7 +411,7 @@ async def test_exec_omits_optional_feature_flags_when_unset(
 
 
 @pytest.mark.asyncio
-async def test_exec_rejects_max_threads_over_limit(
+async def test_exec_rejects_max_threads_below_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
@@ -415,7 +420,7 @@ async def test_exec_rejects_max_threads_over_limit(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
     exec = CodexExec("codex-binary")
-    args = CodexExecArgs(input="hello", max_threads=7)
+    args = CodexExecArgs(input="hello", max_threads=0)
 
     with pytest.raises(CodexError):
         async for _ in exec.run(args):

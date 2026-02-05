@@ -41,6 +41,11 @@ from .exceptions import (
 from .hooks import ThreadHooks
 from .items import (
     AgentMessageItem,
+    CollabAgentState,
+    CollabAgentStatus,
+    CollabTool,
+    CollabToolCallItem,
+    CollabToolCallStatus,
     CommandExecutionItem,
     CommandExecutionStatus,
     ErrorItem,
@@ -77,7 +82,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.91.0"
+__version__ = "0.98.0"
 
 __all__ = [
     "AbortController",
@@ -117,6 +122,7 @@ __all__ = [
     "CommandExecutionItem",
     "FileChangeItem",
     "McpToolCallItem",
+    "CollabToolCallItem",
     "McpToolCallItemResult",
     "McpToolCallItemError",
     "WebSearchItem",
@@ -126,6 +132,10 @@ __all__ = [
     "PatchChangeKind",
     "PatchApplyStatus",
     "McpToolCallStatus",
+    "CollabToolCallStatus",
+    "CollabTool",
+    "CollabAgentStatus",
+    "CollabAgentState",
     "TodoItem",
     "CodexOptions",
     "ThreadOptions",

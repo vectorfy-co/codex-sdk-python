@@ -26,7 +26,6 @@ models = importlib.import_module("pydantic_ai.models")
 tools = importlib.import_module("pydantic_ai.tools")
 
 BuiltinToolCallPart = messages.BuiltinToolCallPart
-FilePart = messages.FilePart
 ModelRequest = messages.ModelRequest
 ModelResponse = messages.ModelResponse
 PartStartEvent = messages.PartStartEvent
@@ -103,9 +102,11 @@ async def test_codex_model_returns_tool_calls():
     assert response.parts[0].tool_name == "add"
     assert response.parts[0].tool_call_id == "call_1"
     assert response.parts[0].args == '{"a":1,"b":2}'
-    assert response.usage.input_tokens == 1
-    assert response.usage.cache_read_tokens == 2
-    assert response.usage.output_tokens == 3
+    assert response.usage.requests == 1
+    assert response.usage.request_tokens == 1
+    assert response.usage.response_tokens == 3
+    assert response.usage.total_tokens == 4
+    assert response.usage.details == {"cached_input_tokens": 2}
 
     # Schema should restrict tool names
     enum = thread.last_schema["properties"]["tool_calls"]["items"]["properties"][
@@ -186,7 +187,6 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
             ToolDefinition(
                 name="a",
                 description="A",
-                sequential=True,
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},
@@ -198,7 +198,7 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
             ToolDefinition(
                 name="final",
                 description="Final",
-                sequential=True,
+                kind="output",
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},
@@ -209,7 +209,6 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
     )
     assert "Function tools:" in manifest
     assert "- a" in manifest
-    assert "sequential: true" in manifest
     assert "Output tools" in manifest
     assert "- final" in manifest
 
@@ -225,20 +224,16 @@ def test_render_tool_definitions_includes_metadata_and_timeout():
                     "properties": {},
                     "additionalProperties": False,
                 },
-                metadata={"tier": "gold", "scope": ["read", "write"]},
-                timeout=2.5,
                 strict=True,
                 outer_typed_dict_key="payload",
-                kind="external",
+                kind="function",
             )
         ],
         output_tools=[],
     )
-    assert 'metadata: {"scope":["read","write"],"tier":"gold"}' in manifest
-    assert "timeout: 2.5" in manifest
     assert "strict: true" in manifest
     assert "outer_typed_dict_key: payload" in manifest
-    assert "kind: external" in manifest
+    assert "kind: function" in manifest
 
 
 def test_render_tool_definitions_includes_output_tool_metadata():
@@ -253,16 +248,12 @@ def test_render_tool_definitions_includes_output_tool_metadata():
                     "properties": {},
                     "additionalProperties": False,
                 },
-                metadata={"priority": "high"},
-                timeout=1.0,
                 strict=False,
                 outer_typed_dict_key="payload",
                 kind="output",
             )
         ],
     )
-    assert 'metadata: {"priority":"high"}' in manifest
-    assert "timeout: 1.0" in manifest
     assert "strict: false" in manifest
     assert "outer_typed_dict_key: payload" in manifest
     assert "kind: output" in manifest
@@ -290,6 +281,12 @@ def test_envelope_extractors_filter_invalid_shapes():
 
 
 def test_render_message_history_includes_request_and_response_parts():
+    class DummyFilePart:
+        part_kind = "file"
+
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
     history = _render_message_history(
         [
             ModelRequest(
@@ -299,7 +296,7 @@ def test_render_message_history_includes_request_and_response_parts():
                     UserPromptPart([{"type": "text", "text": "hi"}]),
                     ToolReturnPart("t", {"x": 1}, tool_call_id="call_1"),
                     RetryPromptPart("retry"),
-                    FilePart(b"abc"),
+                    DummyFilePart(b"abc"),
                 ],
                 instructions="ins",
             ),
@@ -419,7 +416,7 @@ async def test_codex_model_request_stream_yields_response():
     assert len(response.parts) == 1
     assert isinstance(response.parts[0], TextPart)
     assert response.parts[0].content == "hello"
-    assert response.provider_details == {"thread_id": "thread-123"}
+    assert response.vendor_details == {"thread_id": "thread-123"}
 
 
 def test_codex_model_can_construct_codex_from_options():

@@ -40,3 +40,8 @@ def test_encode_config_overrides_rejects_invalid_values():
         encode_config_overrides({"bad": float("nan")})
     with pytest.raises(TypeError):
         encode_config_overrides({"bad": object()})
+
+
+def test_encode_config_overrides_rejects_non_string_mapping_keys():
+    with pytest.raises(TypeError):
+        encode_config_overrides({"nested": {1: "nope"}})  # type: ignore[dict-item]

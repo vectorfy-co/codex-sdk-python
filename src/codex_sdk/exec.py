@@ -226,10 +226,9 @@ class CodexExec:
             )
 
         if args.max_threads is not None:
-            if args.max_threads > 6:
+            if args.max_threads < 1:
                 raise CodexError(
-                    "max_threads cannot exceed 6 in Codex 0.91.0+; "
-                    f"received {args.max_threads}."
+                    "max_threads must be at least 1; " f"received {args.max_threads}."
                 )
             command_args.extend(["--config", f"agents.max_threads={args.max_threads}"])
 
@@ -315,12 +314,15 @@ class CodexExec:
                 ["--config", f'approval_policy="{args.approval_policy}"']
             )
 
+        if args.thread_id:
+            command_args.extend(["resume", args.thread_id])
+
+        # When resuming, ensure resume args come before `--image` flags.
+        # `--image <FILE>...` accepts multiple values and can greedily consume
+        # positional tokens like "resume" if placed earlier.
         if args.images:
             for image in args.images:
                 command_args.extend(["--image", image])
-
-        if args.thread_id:
-            command_args.extend(["resume", args.thread_id])
 
         if self._env_override is not None:
             env = dict(self._env_override)

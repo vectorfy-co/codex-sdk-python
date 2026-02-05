@@ -9,6 +9,8 @@ from codex_sdk.exceptions import CodexError, CodexParseError, TurnFailedError
 from codex_sdk.hooks import ThreadHooks
 from codex_sdk.items import (
     AgentMessageItem,
+    CollabAgentState,
+    CollabToolCallItem,
     CommandExecutionItem,
     ErrorItem,
     FileChangeItem,
@@ -308,6 +310,35 @@ def test_parse_item_branches():
         WebSearchItem(id="w", type="web_search", query="q")
     )
 
+    collab_item = thread._parse_item(
+        {
+            "id": "col",
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "sender_thread_id": "thr_1",
+            "receiver_thread_ids": ["thr_2", "thr_3"],
+            "prompt": "do it",
+            "agents_states": {
+                "thr_2": {"status": "running"},
+                "thr_3": {"status": "completed", "message": "ok"},
+            },
+            "status": "in_progress",
+        }
+    )
+    assert collab_item == CollabToolCallItem(
+        id="col",
+        type="collab_tool_call",
+        tool="spawn_agent",
+        sender_thread_id="thr_1",
+        receiver_thread_ids=["thr_2", "thr_3"],
+        prompt="do it",
+        agents_states={
+            "thr_2": CollabAgentState(status="running", message=None),
+            "thr_3": CollabAgentState(status="completed", message="ok"),
+        },
+        status="in_progress",
+    )
+
     todo = thread._parse_item(
         {
             "id": "t",
@@ -454,6 +485,16 @@ async def test_turn_filters_work():
             McpToolCallItem(
                 id="m", type="mcp_tool_call", server="s", tool="t", status="completed"
             ),
+            CollabToolCallItem(
+                id="col",
+                type="collab_tool_call",
+                tool="spawn_agent",
+                sender_thread_id="thr_1",
+                receiver_thread_ids=["thr_2"],
+                prompt=None,
+                agents_states={},
+                status="completed",
+            ),
             WebSearchItem(id="w", type="web_search", query="q"),
             TodoListItem(
                 id="t", type="todo_list", items=[TodoItem(text="x", completed=False)]
@@ -469,6 +510,7 @@ async def test_turn_filters_work():
     assert [c.id for c in turn.commands()] == ["c"]
     assert [f.id for f in turn.file_changes()] == ["f"]
     assert [m.id for m in turn.mcp_tool_calls()] == ["m"]
+    assert [c.id for c in turn.collab_tool_calls()] == ["col"]
     assert [w.id for w in turn.web_searches()] == ["w"]
     assert [t.id for t in turn.todo_lists()] == ["t"]
     assert [e.id for e in turn.errors()] == ["e"]
