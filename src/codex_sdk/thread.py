@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import (
     Any,
     AsyncGenerator,
+    Dict,
     Generic,
     List,
     Literal,
@@ -18,6 +19,7 @@ from typing import (
     TypedDict,
     TypeVar,
     Union,
+    cast,
 )
 
 from .config_overrides import merge_config_overrides
@@ -27,6 +29,7 @@ from .exec import CodexExec, CodexExecArgs, create_output_schema_file
 from .hooks import ThreadHooks, dispatch_event
 from .items import (
     AgentMessageItem,
+    CollabToolCallItem,
     CommandExecutionItem,
     ErrorItem,
     FileChangeItem,
@@ -64,6 +67,9 @@ class Turn:
 
     def mcp_tool_calls(self) -> List[McpToolCallItem]:
         return [item for item in self.items if item.type == "mcp_tool_call"]
+
+    def collab_tool_calls(self) -> List[CollabToolCallItem]:
+        return [item for item in self.items if item.type == "collab_tool_call"]
 
     def web_searches(self) -> List[WebSearchItem]:
         return [item for item in self.items if item.type == "web_search"]
@@ -372,6 +378,9 @@ class Thread:
         """Parse a JSON item into the appropriate ThreadItem type."""
         from .items import (
             AgentMessageItem,
+            CollabAgentState,
+            CollabAgentStatus,
+            CollabToolCallItem,
             CommandExecutionItem,
             ErrorItem,
             FileChangeItem,
@@ -439,8 +448,50 @@ class Thread:
                 result=result,
                 error=error,
             )
+        elif item_type == "collab_tool_call":
+            raw_receiver_ids = data.get("receiver_thread_ids")
+            receiver_thread_ids: List[str] = []
+            if isinstance(raw_receiver_ids, list):
+                receiver_thread_ids = [
+                    str(entry) for entry in raw_receiver_ids if isinstance(entry, str)
+                ]
+
+            raw_agents_states = data.get("agents_states")
+            agents_states: Dict[str, CollabAgentState] = {}
+            if isinstance(raw_agents_states, dict):
+                for key, value in raw_agents_states.items():
+                    if not isinstance(key, str) or not isinstance(value, dict):
+                        continue
+                    status = value.get("status")
+                    if not isinstance(status, str):
+                        continue
+                    message = value.get("message")
+                    agents_states[key] = CollabAgentState(
+                        status=cast(CollabAgentStatus, status),
+                        message=message if isinstance(message, str) else None,
+                    )
+
+            prompt = data.get("prompt")
+            return CollabToolCallItem(
+                id=data["id"],
+                type="collab_tool_call",
+                tool=data["tool"],
+                sender_thread_id=data["sender_thread_id"],
+                receiver_thread_ids=receiver_thread_ids,
+                prompt=prompt if isinstance(prompt, str) else None,
+                agents_states=agents_states,
+                status=data["status"],
+            )
         elif item_type == "web_search":
-            return WebSearchItem(id=data["id"], type="web_search", query=data["query"])
+            query = data.get("query", "")
+            if not isinstance(query, str):
+                query = ""
+            return WebSearchItem(
+                id=data["id"],
+                type="web_search",
+                query=query,
+                action=data.get("action"),
+            )
         elif item_type == "todo_list":
             items = [
                 TodoItem(text=item["text"], completed=item["completed"])

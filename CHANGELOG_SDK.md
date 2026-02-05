@@ -2,6 +2,30 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.98.0] - 2026-02-05
+
+### Added
+- Exec event parsing for `collab_tool_call` items (collaboration tool calls).
+- Exec event parsing for `web_search` `action` payloads.
+- Thread option `model_personality="none"` (mirrors app-server personality support).
+- App-server option `experimental_api_enabled` to opt into experimental methods/fields via `initialize.capabilities.experimentalApi=true`.
+- App-server helpers: `thread_name_set`, `thread_unarchive`, `thread_compact_start`,
+  `skills_remote_read`, `skills_remote_write`, and `skills_config_write`.
+- `thread_list` now accepts `sort_key` and `source_kinds`.
+
+### Updated
+- Fixed `codex exec` argument ordering when resuming a thread with `--image` attachments
+  (resume args now precede image args to avoid greedy flag parsing).
+- `max_threads` validation now only enforces `>= 1` (Codex defaults to 6; this is not a hard cap).
+- PydanticAI integration updated for `pydantic-ai` 0.6.x.
+- `scripts/setup_binary.py` now pins the npm download to `@openai/codex-sdk@<pyproject version>`
+  so vendor binaries match the SDK version.
+- Bundled Codex CLI vendor binaries updated to 0.98.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.98.0 to match Codex CLI release.
+
+### Notes
+- Codex 0.98.0 introduces GPT-5.3-Codex (model availability is controlled by your Codex provider).
+
 ## [0.91.0] - 2026-01-27
 
 ### Added

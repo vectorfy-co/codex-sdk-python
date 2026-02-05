@@ -7,6 +7,7 @@ for use with the Python SDK.
 """
 
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -61,7 +62,9 @@ def download_codex_package():
 
     try:
         # Download the package
-        run_command(["npm", "pack", "@openai/codex-sdk"], cwd=temp_dir)
+        package_spec = resolve_codex_sdk_npm_spec()
+        print(f"Using npm package: {package_spec}")
+        run_command(["npm", "pack", package_spec], cwd=temp_dir)
 
         # Find the downloaded tarball
         tarball_files = list(temp_dir.glob("*.tgz"))
@@ -268,6 +271,36 @@ def main():
         print("2. Check your internet connection")
         print("3. Try running: conda install nodejs")
         return 1
+
+
+def resolve_codex_sdk_npm_spec() -> str:
+    """Resolve @openai/codex-sdk package spec pinned to this repo's pyproject version when possible."""
+    sdk_dir = Path(__file__).resolve().parent.parent
+    pyproject_path = sdk_dir / "pyproject.toml"
+    version = read_pyproject_version(pyproject_path)
+    if version:
+        return f"@openai/codex-sdk@{version}"
+    return "@openai/codex-sdk"
+
+
+def read_pyproject_version(pyproject_path: Path) -> str:
+    """Read [project].version from pyproject.toml (best-effort, no TOML parser dependency)."""
+    if not pyproject_path.exists():
+        return ""
+
+    in_project = False
+    version_re = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']\s*$')
+    for line in pyproject_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project:
+            match = version_re.match(stripped)
+            if match:
+                return match.group(1)
+
+    return ""
 
 
 if __name__ == "__main__":

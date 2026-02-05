@@ -25,7 +25,6 @@ from ..telemetry import span
 from ..thread import TurnOptions
 
 try:
-    from pydantic_ai import RunContext
     from pydantic_ai.messages import (
         ModelMessage,
         ModelRequest,
@@ -38,7 +37,7 @@ try:
     from pydantic_ai.profiles import ModelProfile, ModelProfileSpec
     from pydantic_ai.settings import ModelSettings
     from pydantic_ai.tools import ToolDefinition
-    from pydantic_ai.usage import RequestUsage
+    from pydantic_ai.usage import Usage as PydanticUsage
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
@@ -124,12 +123,14 @@ def _render_tool_definitions(
                 lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
             if tool.strict is not None:
                 lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            if getattr(tool, "sequential", False):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     if output_tools:
         if lines:
@@ -149,12 +150,14 @@ def _render_tool_definitions(
                 lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
             if tool.strict is not None:
                 lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            if getattr(tool, "sequential", False):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     return "\n".join(lines).strip()
 
@@ -270,35 +273,49 @@ class CodexStreamedResponse(StreamedResponse):
     """Minimal streamed response wrapper for Codex model provider."""
 
     _model_name: str
-    _provider_name: str
-    _provider_url: Optional[str]
     _parts: Sequence[Any]
-    _usage_init: InitVar[RequestUsage]
+    _thread_id: str
+    _usage_init: InitVar[PydanticUsage]
     _timestamp: datetime = field(default_factory=_now_utc, init=False)
 
-    def __post_init__(self, _usage_init: RequestUsage) -> None:
+    def __post_init__(self, _usage_init: PydanticUsage) -> None:
         self._usage = _usage_init
 
     async def _get_event_iterator(
         self,
     ) -> AsyncIterator[ModelResponseStreamEvent]:
         for index, part in enumerate(self._parts):
-            yield self._parts_manager.handle_part(
-                vendor_part_id=index,
-                part=part,
-            )
+            if isinstance(part, TextPart):
+                event = self._parts_manager.handle_text_delta(
+                    vendor_part_id=index,
+                    content=part.content,
+                )
+            elif isinstance(part, ToolCallPart):
+                event = self._parts_manager.handle_tool_call_part(
+                    vendor_part_id=index,
+                    tool_name=part.tool_name,
+                    args=part.args,
+                    tool_call_id=part.tool_call_id,
+                )
+            else:
+                event = None
+
+            if event is not None:
+                yield event
+
+    def get(self) -> ModelResponse:
+        """Build a ModelResponse from streamed events so far, including vendor details."""
+        return ModelResponse(
+            parts=self._parts_manager.get_parts(),
+            model_name=self.model_name,
+            timestamp=self.timestamp,
+            usage=self.usage(),
+            vendor_details={"thread_id": self._thread_id},
+        )
 
     @property
     def model_name(self) -> str:
         return self._model_name
-
-    @property
-    def provider_name(self) -> str:
-        return self._provider_name
-
-    @property
-    def provider_url(self) -> Optional[str]:
-        return self._provider_url
 
     @property
     def timestamp(self) -> datetime:
@@ -360,10 +377,10 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
-        model_settings, model_request_parameters = self.prepare_request(
-            model_settings,
-            model_request_parameters,
+    ) -> tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
+        del model_settings
+        model_request_parameters = self.customize_request_parameters(
+            model_request_parameters
         )
 
         tool_defs = [
@@ -418,12 +435,17 @@ class CodexModel(Model):
                 prompt, output_schema=output_schema, turn_options=TurnOptions()
             )
 
-        usage = RequestUsage()
+        usage = PydanticUsage(requests=1)
         if parsed_turn.turn.usage is not None:
-            usage = RequestUsage(
-                input_tokens=parsed_turn.turn.usage.input_tokens,
-                output_tokens=parsed_turn.turn.usage.output_tokens,
-                cache_read_tokens=parsed_turn.turn.usage.cached_input_tokens,
+            cached = parsed_turn.turn.usage.cached_input_tokens
+            details = {"cached_input_tokens": cached} if cached else None
+            usage = PydanticUsage(
+                requests=1,
+                request_tokens=parsed_turn.turn.usage.input_tokens,
+                response_tokens=parsed_turn.turn.usage.output_tokens,
+                total_tokens=parsed_turn.turn.usage.input_tokens
+                + parsed_turn.turn.usage.output_tokens,
+                details=details,
             )
 
         tool_calls = _tool_calls_from_envelope(parsed_turn.output)
@@ -461,8 +483,7 @@ class CodexModel(Model):
             parts=parts,
             usage=usage,
             model_name=self.model_name,
-            provider_name="codex",
-            provider_details={"thread_id": thread_id},
+            vendor_details={"thread_id": thread_id},
         )
 
     @asynccontextmanager
@@ -471,21 +492,16 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-        run_context: Optional[RunContext[Any]] = None,
     ) -> AsyncIterator[StreamedResponse]:
-        del run_context
-        parts, usage, thread_id, prepared_params = await self._run_codex_request(
+        parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
             model_settings,
             model_request_parameters,
         )
         streamed = CodexStreamedResponse(
-            model_request_parameters=prepared_params,
             _model_name=self.model_name,
-            _provider_name="codex",
-            _provider_url=None,
             _parts=parts,
+            _thread_id=thread_id,
             _usage_init=usage,
         )
-        streamed.provider_details = {"thread_id": thread_id}
         yield streamed

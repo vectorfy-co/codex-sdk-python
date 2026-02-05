@@ -51,6 +51,8 @@ class AppServerOptions:
     env: Optional[Mapping[str, str]] = None
     config_overrides: Optional[ConfigOverrides] = None
     client_info: Optional[AppServerClientInfo] = None
+    # Enables experimental app-server methods/fields gated behind initialize.capabilities.
+    experimental_api_enabled: bool = False
     auto_initialize: bool = True
     request_timeout: Optional[float] = None
 
@@ -373,9 +375,11 @@ class AppServerClient:
         if client_info is None:
             client_info = self._default_client_info()
 
-        result = await self._request_dict(
-            "initialize", {"clientInfo": client_info.as_dict()}
-        )
+        params: Dict[str, Any] = {"clientInfo": client_info.as_dict()}
+        if self._options.experimental_api_enabled:
+            params["capabilities"] = {"experimentalApi": True}
+
+        result = await self._request_dict("initialize", params)
         await self.notify("initialized")
         return result
 
@@ -480,7 +484,9 @@ class AppServerClient:
         *,
         cursor: Optional[str] = None,
         limit: Optional[int] = None,
+        sort_key: Optional[str] = None,
         model_providers: Optional[Sequence[str]] = None,
+        source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
@@ -488,8 +494,12 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
+        if sort_key is not None:
+            params["sort_key"] = sort_key
         if model_providers is not None:
             params["model_providers"] = list(model_providers)
+        if source_kinds is not None:
+            params["source_kinds"] = list(source_kinds)
         if archived is not None:
             params["archived"] = archived
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
@@ -502,6 +512,17 @@ class AppServerClient:
 
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
         return await self._request_dict("thread/archive", {"threadId": thread_id})
+
+    async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
+        return await self._request_dict(
+            "thread/name/set", {"threadId": thread_id, "name": name}
+        )
+
+    async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
+        return await self._request_dict("thread/unarchive", {"threadId": thread_id})
+
+    async def thread_compact_start(self, thread_id: str) -> Dict[str, Any]:
+        return await self._request_dict("thread/compact/start", {"threadId": thread_id})
 
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
@@ -567,6 +588,19 @@ class AppServerClient:
         if cwds:
             payload["cwds"] = [str(path) for path in cwds]
         return await self._request_dict("skills/list", _coerce_keys(payload))
+
+    async def skills_remote_read(self) -> Dict[str, Any]:
+        return await self._request_dict("skills/remote/read", {})
+
+    async def skills_remote_write(
+        self, *, hazelnut_id: str, is_preload: bool
+    ) -> Dict[str, Any]:
+        payload = {"hazelnut_id": hazelnut_id, "is_preload": is_preload}
+        return await self._request_dict("skills/remote/write", _coerce_keys(payload))
+
+    async def skills_config_write(self, *, path: str, enabled: bool) -> Dict[str, Any]:
+        payload = {"path": path, "enabled": enabled}
+        return await self._request_dict("skills/config/write", payload)
 
     async def turn_start(
         self,
