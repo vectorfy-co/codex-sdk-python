@@ -88,6 +88,16 @@ class CodexExec:
         executable_path: Optional[str] = None,
         env: Optional[Mapping[str, str]] = None,
     ):
+        """Create a Codex CLI executor.
+
+        Args:
+            executable_path: Optional explicit path to the `codex` binary. If omitted,
+                the SDK will locate the vendored binary for the current platform and
+                fall back to PATH.
+            env: Optional environment overrides to use when spawning the CLI. When
+                provided, only these variables are passed (plus required Codex SDK
+                metadata).
+        """
         self.executable_path = executable_path or self._find_codex_path()
         self._env_override = dict(env) if env is not None else None
         self._ensure_executable()

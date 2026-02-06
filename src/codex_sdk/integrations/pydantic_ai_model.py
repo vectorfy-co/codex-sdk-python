@@ -388,6 +388,18 @@ class CodexModel(Model):
         settings: Optional[ModelSettings] = None,
         system: str = "openai",
     ) -> None:
+        """Create a Codex-backed PydanticAI model provider.
+
+        Args:
+            codex: Optional Codex instance to delegate work to.
+            codex_options: Options used only when creating a default Codex instance.
+            thread_options: Options used when starting Codex threads for each request.
+                When not provided, safe defaults are applied (read-only sandbox, no
+                web search, and no network).
+            profile: Optional PydanticAI profile describing capabilities.
+            settings: Optional PydanticAI model settings.
+            system: PydanticAI vendor/system identifier (used for routing/metadata).
+        """
         if codex is None:
             codex = Codex(codex_options or CodexOptions())
         if thread_options is None:
@@ -419,10 +431,12 @@ class CodexModel(Model):
 
     @property
     def model_name(self) -> str:
+        """Return the model identifier for this provider."""
         return self._thread_options.model or "codex"
 
     @property
     def system(self) -> str:
+        """Return the provider system identifier (vendor name)."""
         return self._system
 
     async def _run_codex_request(

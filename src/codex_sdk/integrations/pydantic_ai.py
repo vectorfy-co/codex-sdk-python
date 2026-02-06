@@ -98,6 +98,15 @@ class CodexHandoff:
         return self._thread
 
     async def run(self, prompt: str) -> Dict[str, Any]:
+        """Run `prompt` in Codex and return a JSON-friendly result dict.
+
+        Args:
+            prompt: Input text sent to Codex.
+
+        Returns:
+            A dictionary containing at least `thread_id` and `final_response`. Depending
+            on configuration, it may also include `usage` and a summarized `items` list.
+        """
         thread = self._get_thread()
         with span(
             "codex_sdk.pydantic_ai.handoff",
