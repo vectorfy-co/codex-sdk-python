@@ -369,6 +369,17 @@ class AppServerClient:
     async def initialize(
         self, client_info: Optional[AppServerClientInfo] = None
     ) -> Dict[str, Any]:
+        """
+        Initialize the app-server client and register client information with the app-server.
+        
+        Ensures the underlying subprocess is started, sends an `initialize` request containing the provided (or default) client information and the experimental API capability when enabled, then emits an `initialized` notification.
+        
+        Parameters:
+            client_info (Optional[AppServerClientInfo]): Client identity to register; if omitted a default client identity is used.
+        
+        Returns:
+            result (Dict[str, Any]): The response payload returned by the app-server for the `initialize` request.
+        """
         if self._process is None:
             await self.start()
 
@@ -489,6 +500,20 @@ class AppServerClient:
         source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
     ) -> Dict[str, Any]:
+        """
+        Retrieve a page of threads from the app-server with optional filtering and sorting.
+        
+        Parameters:
+            cursor (Optional[str]): Pagination cursor to continue listing from.
+            limit (Optional[int]): Maximum number of threads to return.
+            sort_key (Optional[str]): Key to sort results by (server-defined).
+            model_providers (Optional[Sequence[str]]): Filter threads by one or more model provider identifiers.
+            source_kinds (Optional[Sequence[str]]): Filter threads by one or more source kinds.
+            archived (Optional[bool]): If set, restrict results to archived (`True`) or unarchived (`False`) threads.
+        
+        Returns:
+            Dict[str, Any]: The raw response dictionary returned by the app-server for the `thread/list` request.
+        """
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -511,22 +536,66 @@ class AppServerClient:
         return await self._request_dict("thread/read", _coerce_keys(payload))
 
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Archive the thread identified by `thread_id`.
+        
+        Parameters:
+        	thread_id (str): Identifier of the thread to archive.
+        
+        Returns:
+        	response (Dict[str, Any]): The app-server's response payload for the archive operation.
+        """
         return await self._request_dict("thread/archive", {"threadId": thread_id})
 
     async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
+        """
+        Set the display name for a thread.
+        
+        Parameters:
+            thread_id (str): Identifier of the thread to rename.
+            name (str): New name to assign to the thread.
+        
+        Returns:
+            result (dict): Response payload returned by the app-server.
+        """
         return await self._request_dict(
             "thread/name/set", {"threadId": thread_id, "name": name}
         )
 
     async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Unarchives the thread identified by `thread_id`.
+        
+        Parameters:
+            thread_id (str): Identifier of the thread to unarchive.
+        
+        Returns:
+            result (Dict[str, Any]): Response dictionary from the app-server for the unarchive operation.
+        """
         return await self._request_dict("thread/unarchive", {"threadId": thread_id})
 
     async def thread_compact_start(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Starts a compaction operation for the specified thread on the app-server.
+        
+        Returns:
+            dict: The app-server's result payload for the compaction start request.
+        """
         return await self._request_dict("thread/compact/start", {"threadId": thread_id})
 
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
     ) -> Dict[str, Any]:
+        """
+        Rolls back a thread by removing the specified number of turns.
+        
+        Parameters:
+            thread_id (str): Identifier of the thread to roll back.
+            num_turns (int): Number of most recent turns to remove from the thread.
+        
+        Returns:
+            dict: Result dictionary returned by the app-server for the rollback operation.
+        """
         return await self._request_dict(
             "thread/rollback", {"threadId": thread_id, "numTurns": num_turns}
         )
@@ -584,21 +653,57 @@ class AppServerClient:
         cwds: Optional[Sequence[Union[str, Path]]] = None,
         force_reload: bool = False,
     ) -> Dict[str, Any]:
+        """
+        List skills available to the app-server, optionally scoped to specific working directories.
+        
+        Parameters:
+            cwds (Optional[Sequence[Union[str, Path]]]): Sequence of directory paths to scope the skills listing; each path will be converted to a string. If omitted, the server uses its default scope.
+            force_reload (bool): If true, instructs the server to reload skill data before returning results.
+        
+        Returns:
+            dict: The parsed response payload from the `skills/list` app-server method.
+        """
         payload: Dict[str, Any] = {"force_reload": force_reload}
         if cwds:
             payload["cwds"] = [str(path) for path in cwds]
         return await self._request_dict("skills/list", _coerce_keys(payload))
 
     async def skills_remote_read(self) -> Dict[str, Any]:
+        """
+        Read remote skills metadata from the app server.
+        
+        Returns:
+            result (Dict[str, Any]): The app-server response payload for the `skills/remote/read` request.
+        """
         return await self._request_dict("skills/remote/read", {})
 
     async def skills_remote_write(
         self, *, hazelnut_id: str, is_preload: bool
     ) -> Dict[str, Any]:
+        """
+        Start a remote skill write operation for a Hazelnut package.
+        
+        Parameters:
+            hazelnut_id (str): Identifier of the remote Hazelnut skill to write.
+            is_preload (bool): Whether the skill should be marked as a preload.
+        
+        Returns:
+            dict: Result returned by the app-server for the "skills/remote/write" request.
+        """
         payload = {"hazelnut_id": hazelnut_id, "is_preload": is_preload}
         return await self._request_dict("skills/remote/write", _coerce_keys(payload))
 
     async def skills_config_write(self, *, path: str, enabled: bool) -> Dict[str, Any]:
+        """
+        Set the enabled state of a skill configuration at the given path.
+        
+        Parameters:
+            path (str): The configuration path identifying the skill.
+            enabled (bool): True to enable the skill at the path, False to disable it.
+        
+        Returns:
+            dict: The app-server response as a dictionary.
+        """
         payload = {"path": path, "enabled": enabled}
         return await self._request_dict("skills/config/write", payload)
 
@@ -608,6 +713,17 @@ class AppServerClient:
         input: AppServerInput,
         **params: Any,
     ) -> Dict[str, Any]:
+        """
+        Start a new turn in the specified thread using the provided user input.
+        
+        Parameters:
+            thread_id (str): Identifier of the thread to start the turn in.
+            input (AppServerInput): User input for the turn; may be a string or a sequence of input items and will be normalized to the app-server format.
+            **params: Additional optional request parameters; keys with None values are omitted and snake_case keys are converted to camelCase.
+        
+        Returns:
+            dict: The app-server's response payload for the started turn.
+        """
         payload = {"threadId": thread_id, "input": normalize_app_server_input(input)}
         payload.update(_coerce_keys(params))
         return await self._request_dict("turn/start", payload)

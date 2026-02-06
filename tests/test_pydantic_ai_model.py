@@ -285,6 +285,12 @@ def test_render_message_history_includes_request_and_response_parts():
         part_kind = "file"
 
         def __init__(self, content: bytes) -> None:
+            """
+            Initialize the object with raw file content.
+            
+            Parameters:
+                content (bytes): Raw bytes of the file to store on the instance.
+            """
             self.content = content
 
     history = _render_message_history(

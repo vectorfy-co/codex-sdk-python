@@ -169,17 +169,18 @@ class CodexExec:
 
     async def run(self, args: CodexExecArgs) -> AsyncGenerator[str, None]:
         """
-        Run the Codex CLI with the given arguments and yield decoded output lines.
-
-        Args:
-            args: Structured arguments for the CLI invocation.
-
+        Execute the Codex CLI with the provided arguments and stream each JSON output line as a UTF-8 decoded string.
+        
+        Parameters:
+            args (CodexExecArgs): Structured arguments for the CLI invocation.
+        
         Yields:
-            Each line of JSON output as a UTF-8 decoded string.
-
+            str: Each line of JSON output decoded as a UTF-8 string.
+        
         Raises:
-            CodexCLIError: If the CLI exits with a non-zero status.
-            CodexError: If the CLI cannot be spawned or misconfigured.
+            CodexAbortError: If the operation is aborted via the provided signal.
+            CodexCLIError: If the CLI process exits with a non-zero status (includes captured stderr).
+            CodexError: If the CLI cannot be spawned or is misconfigured.
         """
         command_args = ["exec", "--experimental-json"]
 

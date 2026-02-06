@@ -66,12 +66,30 @@ class Turn:
         return [item for item in self.items if item.type == "file_change"]
 
     def mcp_tool_calls(self) -> List[McpToolCallItem]:
+        """
+        Collects MCP tool call items from the turn.
+        
+        Returns:
+            List[McpToolCallItem]: Items from this turn whose `type` is `"mcp_tool_call"`.
+        """
         return [item for item in self.items if item.type == "mcp_tool_call"]
 
     def collab_tool_calls(self) -> List[CollabToolCallItem]:
+        """
+        Collect all items in the turn that represent collaborative tool calls.
+        
+        Returns:
+            collab_tool_calls (List[CollabToolCallItem]): List of items whose `type` is "collab_tool_call".
+        """
         return [item for item in self.items if item.type == "collab_tool_call"]
 
     def web_searches(self) -> List[WebSearchItem]:
+        """
+        Collects all web search items from the turn.
+        
+        Returns:
+            List[WebSearchItem]: Web search items present in the turn, in their original order.
+        """
         return [item for item in self.items if item.type == "web_search"]
 
     def todo_lists(self) -> List[TodoListItem]:
@@ -375,7 +393,18 @@ class Thread:
             raise CodexParseError(f"Unknown event type: {event_type}")
 
     def _parse_item(self, data: dict) -> ThreadItem:
-        """Parse a JSON item into the appropriate ThreadItem type."""
+        """
+        Convert a JSON-decoded item dictionary into the appropriate ThreadItem instance.
+        
+        Parameters:
+            data (dict): Parsed JSON object representing an item; must include a "type" field and the fields required for that item type.
+        
+        Returns:
+            ThreadItem: A concrete ThreadItem subclass corresponding to the input item's type.
+        
+        Raises:
+            CodexParseError: If the item's "type" is not recognized.
+        """
         from .items import (
             AgentMessageItem,
             CollabAgentState,
