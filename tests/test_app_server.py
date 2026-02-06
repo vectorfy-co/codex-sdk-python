@@ -129,7 +129,7 @@ async def test_app_server_initialize_with_experimental_capabilities(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
-        
+
         Returns:
             FakeProcess: The fake process instance to be used as the spawned subprocess.
         """
@@ -583,7 +583,7 @@ async def test_app_server_reader_loop_skips_blank_lines_and_records_parse_error(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
-        
+
         Returns:
             FakeProcess: The fake process instance to be used as the spawned subprocess.
         """
@@ -614,7 +614,7 @@ async def test_app_server_reader_loop_records_unknown_messages(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
-        
+
         Returns:
             FakeProcess: The fake process instance to be used as the spawned subprocess.
         """
@@ -644,7 +644,7 @@ async def test_app_server_close_fails_pending_requests(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
-        
+
         Returns:
             FakeProcess: The fake process instance to be used as the spawned subprocess.
         """
@@ -672,7 +672,7 @@ async def test_app_server_close_kills_process_on_wait_timeout(
         def __init__(self, stdout: QueueStream) -> None:
             """
             Initialize the instance with the provided QueueStream as its stdout and set the killed flag to False.
-            
+
             Parameters:
                 stdout (QueueStream): Stream used to emulate the process's stdout.
             """
@@ -682,7 +682,7 @@ async def test_app_server_close_kills_process_on_wait_timeout(
         def kill(self) -> None:
             """
             Terminate the process and record that a kill was requested.
-            
+
             Sets the instance's `killed` flag to True and then delegates to the superclass `kill` method to perform process termination.
             """
             self.killed = True
@@ -694,7 +694,7 @@ async def test_app_server_close_kills_process_on_wait_timeout(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
-        
+
         Returns:
             FakeProcess: The fake process instance to be used as the spawned subprocess.
         """
@@ -707,7 +707,7 @@ async def test_app_server_close_kills_process_on_wait_timeout(
     async def fake_wait_for(awaitable: Any, *_args: Any, **_kwargs: Any) -> None:
         """
         Simulate asyncio.wait_for that always times out: schedule the given awaitable as a task, cancel it, and raise asyncio.TimeoutError.
-        
+
         Parameters:
             awaitable: A coroutine or awaitable to be scheduled; it will be cancelled.
             *_args, **_kwargs: Ignored; present for API compatibility.

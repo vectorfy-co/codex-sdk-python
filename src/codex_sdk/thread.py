@@ -68,7 +68,7 @@ class Turn:
     def mcp_tool_calls(self) -> List[McpToolCallItem]:
         """
         Collects MCP tool call items from the turn.
-        
+
         Returns:
             List[McpToolCallItem]: Items from this turn whose `type` is `"mcp_tool_call"`.
         """
@@ -77,7 +77,7 @@ class Turn:
     def collab_tool_calls(self) -> List[CollabToolCallItem]:
         """
         Collect all items in the turn that represent collaborative tool calls.
-        
+
         Returns:
             collab_tool_calls (List[CollabToolCallItem]): List of items whose `type` is "collab_tool_call".
         """
@@ -86,7 +86,7 @@ class Turn:
     def web_searches(self) -> List[WebSearchItem]:
         """
         Collects all web search items from the turn.
-        
+
         Returns:
             List[WebSearchItem]: Web search items present in the turn, in their original order.
         """
@@ -123,11 +123,15 @@ class ParsedTurn(Generic[T]):
 
 
 class TextInput(TypedDict):
+    """Structured input representing a text fragment."""
+
     type: Literal["text"]
     text: str
 
 
 class LocalImageInput(TypedDict):
+    """Structured input representing a local image path attachment."""
+
     type: Literal["local_image"]
     path: str
 
@@ -395,13 +399,13 @@ class Thread:
     def _parse_item(self, data: dict) -> ThreadItem:
         """
         Convert a JSON-decoded item dictionary into the appropriate ThreadItem instance.
-        
+
         Parameters:
             data (dict): Parsed JSON object representing an item; must include a "type" field and the fields required for that item type.
-        
+
         Returns:
             ThreadItem: A concrete ThreadItem subclass corresponding to the input item's type.
-        
+
         Raises:
             CodexParseError: If the item's "type" is not recognized.
         """
@@ -679,6 +683,7 @@ class Thread:
 
 
 def normalize_input(input: Input) -> tuple[str, List[str]]:
+    """Normalize the supported input types into (prompt, local_image_paths)."""
     if isinstance(input, str):
         return input, []
 

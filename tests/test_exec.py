@@ -417,9 +417,9 @@ async def test_exec_rejects_max_threads_below_one(
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
         """
         Fail the test if a subprocess is spawned when max_threads is invalid.
-        
+
         This test helper always raises an AssertionError to ensure no subprocess is created when argument validation should prevent spawning.
-        
+
         Raises:
             AssertionError: Always raised with the message "process should not spawn when max_threads is invalid".
         """

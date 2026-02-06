@@ -13,6 +13,7 @@ from ..thread import Thread
 
 
 def _require_pydantic_ai() -> Any:
+    """Import pydantic_ai or raise a helpful error if it is unavailable."""
     try:
         import pydantic_ai
     except ImportError as exc:  # pragma: no cover
@@ -24,6 +25,7 @@ def _require_pydantic_ai() -> Any:
 
 
 def _jsonable(value: Any) -> Any:
+    """Convert dataclasses/containers into JSON-serializable structures."""
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if isinstance(value, dict):
@@ -34,6 +36,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _item_summary(item: Any) -> Dict[str, Any]:
+    """Summarize a Codex thread item into a compact JSON-friendly mapping."""
     item_type = getattr(item, "type", None)
     if item_type == "agent_message":
         return {"type": "agent_message", "text": getattr(item, "text", "")}

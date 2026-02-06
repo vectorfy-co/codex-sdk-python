@@ -47,12 +47,15 @@ except ImportError as exc:  # pragma: no cover
 
 @dataclass(frozen=True)
 class _ToolCallEnvelope:
+    """Parsed tool-call envelope returned by Codex `--output-schema` turns."""
+
     tool_call_id: str
     tool_name: str
     arguments_json: str
 
 
 def _jsonable(value: Any) -> Any:
+    """Convert values into JSON-serializable structures for prompt/debug output."""
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
@@ -67,6 +70,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _json_dumps(value: Any) -> str:
+    """Dump a value to a deterministic JSON string for prompt embedding."""
     try:
         return json.dumps(
             _jsonable(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
@@ -76,6 +80,7 @@ def _json_dumps(value: Any) -> str:
 
 
 def _build_envelope_schema(tool_names: Sequence[str]) -> Dict[str, Any]:
+    """Build the JSON schema used to constrain Codex output to tool calls + final text."""
     name_schema: Dict[str, Any] = {"type": "string"}
     if tool_names:
         name_schema = {"type": "string", "enum": list(tool_names)}
@@ -110,13 +115,13 @@ def _render_tool_definitions(
 ) -> str:
     """
     Render a human-readable description of provided function and output tool definitions for inclusion in prompts.
-    
+
     Produces a newline-separated block that lists each tool with name, optional description, kind, parameters JSON schema, and optional fields such as outer_typed_dict_key, strict, sequential, metadata, and timeout. Function tools are listed under "Function tools:" and output tools under "Output tools (use ONE of these to finish when text is not allowed):".
-    
+
     Parameters:
         function_tools (Sequence[ToolDefinition]): Tool definitions intended to be called as functions.
         output_tools (Sequence[ToolDefinition]): Tool definitions intended as final output options when direct text is disallowed.
-    
+
     Returns:
         str: The rendered, trimmed multi-line string describing the tools.
     """
@@ -175,6 +180,7 @@ def _render_tool_definitions(
 
 
 def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
+    """Extract tool call envelopes from a Codex JSON turn output."""
     if not isinstance(output, dict):
         return []
 
@@ -206,6 +212,7 @@ def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
 
 
 def _final_from_envelope(output: Any) -> str:
+    """Extract the final text from a Codex JSON turn output."""
     if not isinstance(output, dict):
         return ""
     final = output.get("final")
@@ -213,6 +220,7 @@ def _final_from_envelope(output: Any) -> str:
 
 
 def _render_message_history(messages: Sequence[ModelMessage]) -> str:
+    """Render a compact text representation of PydanticAI message history."""
     lines: List[str] = []
 
     for message in messages:
@@ -277,6 +285,7 @@ def _render_message_history(messages: Sequence[ModelMessage]) -> str:
 
 
 def _now_utc() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
@@ -293,7 +302,7 @@ class CodexStreamedResponse(StreamedResponse):
     def __post_init__(self, _usage_init: PydanticUsage) -> None:
         """
         Save the provided PydanticUsage into the instance's _usage attribute.
-        
+
         Parameters:
             _usage_init (PydanticUsage): Usage information supplied as the dataclass InitVar.
         """
@@ -304,9 +313,9 @@ class CodexStreamedResponse(StreamedResponse):
     ) -> AsyncIterator[ModelResponseStreamEvent]:
         """
         Iterates over stored response parts and yields stream events for text deltas and tool-call parts.
-        
+
         The iterator converts each TextPart into a text-delta event and each ToolCallPart into a tool-call event using the parts manager; other part kinds are ignored.
-        
+
         Returns:
             ModelResponseStreamEvent: An event for each text or tool-call part, yielded in the original parts order.
         """
@@ -332,7 +341,7 @@ class CodexStreamedResponse(StreamedResponse):
     def get(self) -> ModelResponse:
         """
         Construct a complete model response from events received so far.
-        
+
         Returns:
             ModelResponse: Contains collected parts, the model name, timestamp, usage, and `vendor_details` with the Codex thread_id.
         """
@@ -348,7 +357,7 @@ class CodexStreamedResponse(StreamedResponse):
     def model_name(self) -> str:
         """
         Return the model identifier used for the response.
-        
+
         Returns:
             The model identifier string.
         """
@@ -358,7 +367,7 @@ class CodexStreamedResponse(StreamedResponse):
     def timestamp(self) -> datetime:
         """
         Get the UTC timestamp when this response was created.
-        
+
         Returns:
             datetime: The timestamp associated with the response.
         """
@@ -423,12 +432,12 @@ class CodexModel(Model):
     ) -> tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
         """
         Run a Codex thread for the given conversation and request parameters, and parse the JSON envelope into response parts.
-        
+
         Parameters:
             messages (list[ModelMessage]): Conversation messages to include in the Codex prompt.
             model_settings (Optional[ModelSettings]): Ignored by this implementation.
             model_request_parameters (ModelRequestParameters): Controls function/output tool definitions, whether text output is allowed, and may be customized before the request.
-        
+
         Returns:
             tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
                 - parts: A list of response parts produced from the envelope (e.g., ToolCallPart instances for tool calls or TextPart for final text).
@@ -534,12 +543,12 @@ class CodexModel(Model):
     ) -> ModelResponse:
         """
         Send the provided message history to Codex and return a ModelResponse containing the model output and metadata.
-        
+
         Parameters:
             messages: The conversation as a list of ModelMessage objects to send to the model.
             model_settings: Optional model configuration (may be ignored by the Codex backend).
             model_request_parameters: Request-specific parameters that influence Codex execution.
-        
+
         Returns:
             ModelResponse containing the generated parts, usage information, the model name, and vendor_details with the Codex `thread_id`.
         """
@@ -564,12 +573,12 @@ class CodexModel(Model):
     ) -> AsyncIterator[StreamedResponse]:
         """
         Produce an asynchronous stream that yields a Codex-backed streamed model response for the given message sequence.
-        
+
         Parameters:
             messages: Conversation messages to send to the model.
             model_settings: Model-specific settings (may be None).
             model_request_parameters: Additional request parameters controlling the model call.
-        
+
         Returns:
             An async iterator that yields a single StreamedResponse (CodexStreamedResponse) containing the model name, response parts, usage information, and the Codex thread identifier.
         """
