@@ -108,6 +108,18 @@ def _render_tool_definitions(
     function_tools: Sequence[ToolDefinition],
     output_tools: Sequence[ToolDefinition],
 ) -> str:
+    """
+    Render a human-readable description of provided function and output tool definitions for inclusion in prompts.
+    
+    Produces a newline-separated block that lists each tool with name, optional description, kind, parameters JSON schema, and optional fields such as outer_typed_dict_key, strict, sequential, metadata, and timeout. Function tools are listed under "Function tools:" and output tools under "Output tools (use ONE of these to finish when text is not allowed):".
+    
+    Parameters:
+        function_tools (Sequence[ToolDefinition]): Tool definitions intended to be called as functions.
+        output_tools (Sequence[ToolDefinition]): Tool definitions intended as final output options when direct text is disallowed.
+    
+    Returns:
+        str: The rendered, trimmed multi-line string describing the tools.
+    """
     lines: List[str] = []
     if function_tools:
         lines.append("Function tools:")
@@ -279,11 +291,25 @@ class CodexStreamedResponse(StreamedResponse):
     _timestamp: datetime = field(default_factory=_now_utc, init=False)
 
     def __post_init__(self, _usage_init: PydanticUsage) -> None:
+        """
+        Save the provided PydanticUsage into the instance's _usage attribute.
+        
+        Parameters:
+            _usage_init (PydanticUsage): Usage information supplied as the dataclass InitVar.
+        """
         self._usage = _usage_init
 
     async def _get_event_iterator(
         self,
     ) -> AsyncIterator[ModelResponseStreamEvent]:
+        """
+        Iterates over stored response parts and yields stream events for text deltas and tool-call parts.
+        
+        The iterator converts each TextPart into a text-delta event and each ToolCallPart into a tool-call event using the parts manager; other part kinds are ignored.
+        
+        Returns:
+            ModelResponseStreamEvent: An event for each text or tool-call part, yielded in the original parts order.
+        """
         for index, part in enumerate(self._parts):
             if isinstance(part, TextPart):
                 event = self._parts_manager.handle_text_delta(
@@ -304,7 +330,12 @@ class CodexStreamedResponse(StreamedResponse):
                 yield event
 
     def get(self) -> ModelResponse:
-        """Build a ModelResponse from streamed events so far, including vendor details."""
+        """
+        Construct a complete model response from events received so far.
+        
+        Returns:
+            ModelResponse: Contains collected parts, the model name, timestamp, usage, and `vendor_details` with the Codex thread_id.
+        """
         return ModelResponse(
             parts=self._parts_manager.get_parts(),
             model_name=self.model_name,
@@ -315,10 +346,22 @@ class CodexStreamedResponse(StreamedResponse):
 
     @property
     def model_name(self) -> str:
+        """
+        Return the model identifier used for the response.
+        
+        Returns:
+            The model identifier string.
+        """
         return self._model_name
 
     @property
     def timestamp(self) -> datetime:
+        """
+        Get the UTC timestamp when this response was created.
+        
+        Returns:
+            datetime: The timestamp associated with the response.
+        """
         return self._timestamp
 
 
@@ -378,6 +421,21 @@ class CodexModel(Model):
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
     ) -> tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
+        """
+        Run a Codex thread for the given conversation and request parameters, and parse the JSON envelope into response parts.
+        
+        Parameters:
+            messages (list[ModelMessage]): Conversation messages to include in the Codex prompt.
+            model_settings (Optional[ModelSettings]): Ignored by this implementation.
+            model_request_parameters (ModelRequestParameters): Controls function/output tool definitions, whether text output is allowed, and may be customized before the request.
+        
+        Returns:
+            tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
+                - parts: A list of response parts produced from the envelope (e.g., ToolCallPart instances for tool calls or TextPart for final text).
+                - usage: Usage information for the request as a PydanticUsage instance.
+                - thread_id: The Codex thread identifier used for the request.
+                - model_request_parameters: The (possibly customized) ModelRequestParameters actually used for the request.
+        """
         del model_settings
         model_request_parameters = self.customize_request_parameters(
             model_request_parameters
@@ -474,6 +532,17 @@ class CodexModel(Model):
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
+        """
+        Send the provided message history to Codex and return a ModelResponse containing the model output and metadata.
+        
+        Parameters:
+            messages: The conversation as a list of ModelMessage objects to send to the model.
+            model_settings: Optional model configuration (may be ignored by the Codex backend).
+            model_request_parameters: Request-specific parameters that influence Codex execution.
+        
+        Returns:
+            ModelResponse containing the generated parts, usage information, the model name, and vendor_details with the Codex `thread_id`.
+        """
         parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
             model_settings,
@@ -493,6 +562,17 @@ class CodexModel(Model):
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
     ) -> AsyncIterator[StreamedResponse]:
+        """
+        Produce an asynchronous stream that yields a Codex-backed streamed model response for the given message sequence.
+        
+        Parameters:
+            messages: Conversation messages to send to the model.
+            model_settings: Model-specific settings (may be None).
+            model_request_parameters: Additional request parameters controlling the model call.
+        
+        Returns:
+            An async iterator that yields a single StreamedResponse (CodexStreamedResponse) containing the model name, response parts, usage information, and the Codex thread identifier.
+        """
         parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
             model_settings,

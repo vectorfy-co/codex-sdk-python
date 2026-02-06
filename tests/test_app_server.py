@@ -127,6 +127,12 @@ async def test_app_server_initialize_with_experimental_capabilities(
     process = FakeProcess(stdout)
 
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+        
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
@@ -575,6 +581,12 @@ async def test_app_server_reader_loop_skips_blank_lines_and_records_parse_error(
     process = FakeProcess(stdout)
 
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+        
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
@@ -600,6 +612,12 @@ async def test_app_server_reader_loop_records_unknown_messages(
     process = FakeProcess(stdout)
 
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+        
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
@@ -624,6 +642,12 @@ async def test_app_server_close_fails_pending_requests(
     process = FakeProcess(stdout)
 
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+        
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
@@ -646,10 +670,21 @@ async def test_app_server_close_kills_process_on_wait_timeout(
 ) -> None:
     class TimeoutProcess(FakeProcess):
         def __init__(self, stdout: QueueStream) -> None:
+            """
+            Initialize the instance with the provided QueueStream as its stdout and set the killed flag to False.
+            
+            Parameters:
+                stdout (QueueStream): Stream used to emulate the process's stdout.
+            """
             super().__init__(stdout)
             self.killed = False
 
         def kill(self) -> None:
+            """
+            Terminate the process and record that a kill was requested.
+            
+            Sets the instance's `killed` flag to True and then delegates to the superclass `kill` method to perform process termination.
+            """
             self.killed = True
             super().kill()
 
@@ -657,6 +692,12 @@ async def test_app_server_close_kills_process_on_wait_timeout(
     process = TimeoutProcess(stdout)
 
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+        
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
@@ -664,6 +705,13 @@ async def test_app_server_close_kills_process_on_wait_timeout(
     import codex_sdk.app_server as app_server_module
 
     async def fake_wait_for(awaitable: Any, *_args: Any, **_kwargs: Any) -> None:
+        """
+        Simulate asyncio.wait_for that always times out: schedule the given awaitable as a task, cancel it, and raise asyncio.TimeoutError.
+        
+        Parameters:
+            awaitable: A coroutine or awaitable to be scheduled; it will be cancelled.
+            *_args, **_kwargs: Ignored; present for API compatibility.
+        """
         task = asyncio.create_task(awaitable)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
