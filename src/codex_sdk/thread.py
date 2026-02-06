@@ -400,11 +400,12 @@ class Thread:
         """
         Convert a JSON-decoded item dictionary into the appropriate ThreadItem instance.
 
-        Parameters:
-            data (dict): Parsed JSON object representing an item; must include a "type" field and the fields required for that item type.
+        Args:
+            data: Parsed JSON object representing an item; must include a "type" field and the
+                fields required for that item type.
 
         Returns:
-            ThreadItem: A concrete ThreadItem subclass corresponding to the input item's type.
+            A concrete `ThreadItem` instance corresponding to the input item's type.
 
         Raises:
             CodexParseError: If the item's "type" is not recognized.
