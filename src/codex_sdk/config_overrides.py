@@ -37,6 +37,7 @@ def encode_config_overrides(overrides: ConfigOverrides) -> List[str]:
 
 
 def _toml_key(key: Any) -> str:
+    """Encode a TOML inline-table key safely."""
     if not isinstance(key, str):
         raise TypeError("TOML inline table keys must be strings")
     if _KEY_RE.match(key):
@@ -45,6 +46,7 @@ def _toml_key(key: Any) -> str:
 
 
 def _toml_literal(value: Any) -> str:
+    """Encode a Python value as a TOML literal suitable for `--config key=value`."""
     if value is None:
         raise TypeError("None is not a valid TOML literal")
     if isinstance(value, bool):

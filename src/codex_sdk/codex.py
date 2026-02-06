@@ -99,6 +99,7 @@ UUID_RE = re.compile(
 
 
 def _resolve_codex_home(override: Optional[str]) -> Path:
+    """Resolve the Codex home directory based on an explicit override or env."""
     if override:
         return Path(override).expanduser()
     env_value = os.environ.get("CODEX_HOME")
@@ -108,6 +109,7 @@ def _resolve_codex_home(override: Optional[str]) -> Path:
 
 
 def _find_latest_rollout(sessions_root: Path) -> Optional[Path]:
+    """Find the most recently modified rollout JSONL under the sessions directory."""
     if not sessions_root.exists():
         return None
 
@@ -125,6 +127,7 @@ def _find_latest_rollout(sessions_root: Path) -> Optional[Path]:
 
 
 def _extract_thread_id_from_rollout(rollout_path: Path) -> Optional[str]:
+    """Extract the thread id from a rollout file (best effort)."""
     try:
         with rollout_path.open("r", encoding="utf-8") as handle:
             for line in handle:

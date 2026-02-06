@@ -170,13 +170,13 @@ class CodexExec:
     async def run(self, args: CodexExecArgs) -> AsyncGenerator[str, None]:
         """
         Execute the Codex CLI with the provided arguments and stream each JSON output line as a UTF-8 decoded string.
-        
+
         Parameters:
             args (CodexExecArgs): Structured arguments for the CLI invocation.
-        
+
         Yields:
             str: Each line of JSON output decoded as a UTF-8 string.
-        
+
         Raises:
             CodexAbortError: If the operation is aborted via the provided signal.
             CodexCLIError: If the CLI process exits with a non-zero status (includes captured stderr).
@@ -229,7 +229,7 @@ class CodexExec:
         if args.max_threads is not None:
             if args.max_threads < 1:
                 raise CodexError(
-                    "max_threads must be at least 1; " f"received {args.max_threads}."
+                    f"max_threads must be at least 1; received {args.max_threads}."
                 )
             command_args.extend(["--config", f"agents.max_threads={args.max_threads}"])
 
@@ -488,13 +488,16 @@ async def _iter_lines(stream: asyncio.StreamReader) -> AsyncGenerator[str, None]
 
 
 def _write_schema_file(path: str, schema: Mapping[str, Any]) -> None:
+    """Write an output schema to disk as JSON."""
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(dict(schema), handle)
 
 
 def _cleanup_dir(path: str) -> None:
+    """Remove a temporary directory."""
     shutil.rmtree(path, ignore_errors=True)
 
 
 async def _noop() -> None:
+    """A no-op awaitable used as a safe cleanup callback."""
     return None

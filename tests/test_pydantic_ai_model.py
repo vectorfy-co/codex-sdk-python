@@ -3,6 +3,9 @@ import importlib
 
 import pytest
 
+# ruff: noqa: E402
+# Imports are intentionally ordered around import-or-skip behavior.
+
 pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
@@ -287,7 +290,7 @@ def test_render_message_history_includes_request_and_response_parts():
         def __init__(self, content: bytes) -> None:
             """
             Initialize the object with raw file content.
-            
+
             Parameters:
                 content (bytes): Raw bytes of the file to store on the instance.
             """

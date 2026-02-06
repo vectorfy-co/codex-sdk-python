@@ -125,12 +125,16 @@ class McpToolCallItem:
 
 @dataclass
 class McpToolCallItemResult:
+    """Successful result payload returned by an MCP tool call."""
+
     content: List[Any]
     structured_content: Optional[Any] = None
 
 
 @dataclass
 class McpToolCallItemError:
+    """Error payload returned by a failed MCP tool call."""
+
     message: str
 
 

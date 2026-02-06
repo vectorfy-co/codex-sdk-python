@@ -371,12 +371,12 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         Initialize the app-server client and register client information with the app-server.
-        
+
         Ensures the underlying subprocess is started, sends an `initialize` request containing the provided (or default) client information and the experimental API capability when enabled, then emits an `initialized` notification.
-        
+
         Parameters:
             client_info (Optional[AppServerClientInfo]): Client identity to register; if omitted a default client identity is used.
-        
+
         Returns:
             result (Dict[str, Any]): The response payload returned by the app-server for the `initialize` request.
         """
@@ -502,7 +502,7 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
-        
+
         Parameters:
             cursor (Optional[str]): Pagination cursor to continue listing from.
             limit (Optional[int]): Maximum number of threads to return.
@@ -510,7 +510,7 @@ class AppServerClient:
             model_providers (Optional[Sequence[str]]): Filter threads by one or more model provider identifiers.
             source_kinds (Optional[Sequence[str]]): Filter threads by one or more source kinds.
             archived (Optional[bool]): If set, restrict results to archived (`True`) or unarchived (`False`) threads.
-        
+
         Returns:
             Dict[str, Any]: The raw response dictionary returned by the app-server for the `thread/list` request.
         """
@@ -538,23 +538,23 @@ class AppServerClient:
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
         """
         Archive the thread identified by `thread_id`.
-        
+
         Parameters:
-        	thread_id (str): Identifier of the thread to archive.
-        
+                thread_id (str): Identifier of the thread to archive.
+
         Returns:
-        	response (Dict[str, Any]): The app-server's response payload for the archive operation.
+                response (Dict[str, Any]): The app-server's response payload for the archive operation.
         """
         return await self._request_dict("thread/archive", {"threadId": thread_id})
 
     async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
         """
         Set the display name for a thread.
-        
+
         Parameters:
             thread_id (str): Identifier of the thread to rename.
             name (str): New name to assign to the thread.
-        
+
         Returns:
             result (dict): Response payload returned by the app-server.
         """
@@ -565,10 +565,10 @@ class AppServerClient:
     async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
         """
         Unarchives the thread identified by `thread_id`.
-        
+
         Parameters:
             thread_id (str): Identifier of the thread to unarchive.
-        
+
         Returns:
             result (Dict[str, Any]): Response dictionary from the app-server for the unarchive operation.
         """
@@ -577,7 +577,7 @@ class AppServerClient:
     async def thread_compact_start(self, thread_id: str) -> Dict[str, Any]:
         """
         Starts a compaction operation for the specified thread on the app-server.
-        
+
         Returns:
             dict: The app-server's result payload for the compaction start request.
         """
@@ -588,11 +588,11 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         Rolls back a thread by removing the specified number of turns.
-        
+
         Parameters:
             thread_id (str): Identifier of the thread to roll back.
             num_turns (int): Number of most recent turns to remove from the thread.
-        
+
         Returns:
             dict: Result dictionary returned by the app-server for the rollback operation.
         """
@@ -655,11 +655,11 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         List skills available to the app-server, optionally scoped to specific working directories.
-        
+
         Parameters:
             cwds (Optional[Sequence[Union[str, Path]]]): Sequence of directory paths to scope the skills listing; each path will be converted to a string. If omitted, the server uses its default scope.
             force_reload (bool): If true, instructs the server to reload skill data before returning results.
-        
+
         Returns:
             dict: The parsed response payload from the `skills/list` app-server method.
         """
@@ -671,7 +671,7 @@ class AppServerClient:
     async def skills_remote_read(self) -> Dict[str, Any]:
         """
         Read remote skills metadata from the app server.
-        
+
         Returns:
             result (Dict[str, Any]): The app-server response payload for the `skills/remote/read` request.
         """
@@ -682,11 +682,11 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         Start a remote skill write operation for a Hazelnut package.
-        
+
         Parameters:
             hazelnut_id (str): Identifier of the remote Hazelnut skill to write.
             is_preload (bool): Whether the skill should be marked as a preload.
-        
+
         Returns:
             dict: Result returned by the app-server for the "skills/remote/write" request.
         """
@@ -696,11 +696,11 @@ class AppServerClient:
     async def skills_config_write(self, *, path: str, enabled: bool) -> Dict[str, Any]:
         """
         Set the enabled state of a skill configuration at the given path.
-        
+
         Parameters:
             path (str): The configuration path identifying the skill.
             enabled (bool): True to enable the skill at the path, False to disable it.
-        
+
         Returns:
             dict: The app-server response as a dictionary.
         """
@@ -715,12 +715,12 @@ class AppServerClient:
     ) -> Dict[str, Any]:
         """
         Start a new turn in the specified thread using the provided user input.
-        
+
         Parameters:
             thread_id (str): Identifier of the thread to start the turn in.
             input (AppServerInput): User input for the turn; may be a string or a sequence of input items and will be normalized to the app-server format.
             **params: Additional optional request parameters; keys with None values are omitted and snake_case keys are converted to camelCase.
-        
+
         Returns:
             dict: The app-server's response payload for the started turn.
         """
@@ -974,17 +974,23 @@ class AppServerClient:
 
 
 class AppServerByteRange(TypedDict):
+    """Byte range for a text element (inclusive/exclusive semantics are server-defined)."""
+
     start: int
     end: int
 
 
 class AppServerTextElement(TypedDict, total=False):
+    """Text element metadata for app-server inputs."""
+
     byte_range: AppServerByteRange
     byteRange: AppServerByteRange
     placeholder: Optional[str]
 
 
 class AppServerTextInput(TypedDict, total=False):
+    """Text input item for the app-server protocol."""
+
     type: str
     text: str
     text_elements: List[AppServerTextElement]
@@ -992,16 +998,22 @@ class AppServerTextInput(TypedDict, total=False):
 
 
 class AppServerImageInput(TypedDict):
+    """Remote image input item for the app-server protocol."""
+
     type: str
     url: str
 
 
 class AppServerLocalImageInput(TypedDict):
+    """Local image input item for the app-server protocol."""
+
     type: str
     path: str
 
 
 class AppServerSkillInput(TypedDict):
+    """Skill input item for the app-server protocol."""
+
     type: str
     name: str
     path: str
@@ -1018,6 +1030,7 @@ AppServerInput = Union[Sequence[AppServerUserInput], str]
 
 
 def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
+    """Normalize supported SDK inputs into the canonical app-server wire shape."""
     if isinstance(input, str):
         return [{"type": "text", "text": input}]
 
@@ -1042,6 +1055,7 @@ def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
 
 
 def _normalize_text_elements(item: Dict[str, Any]) -> None:
+    """Normalize snake_case metadata keys to the app-server's camelCase shape."""
     elements = None
     if isinstance(item.get("textElements"), list):
         elements = item.get("textElements")
@@ -1065,6 +1079,7 @@ def _normalize_text_elements(item: Dict[str, Any]) -> None:
 
 
 def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """Coerce snake_case keys to camelCase and drop None values."""
     coerced: Dict[str, Any] = {}
     for key, value in params.items():
         if value is None:
@@ -1076,6 +1091,7 @@ def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _snake_to_camel(value: str) -> str:
+    """Convert snake_case strings to lowerCamelCase."""
     parts = value.split("_")
     return parts[0] + "".join(word.capitalize() for word in parts[1:])
 
@@ -1084,6 +1100,7 @@ def _normalize_decision(
     decision: Union[str, Mapping[str, Any]],
     execpolicy_amendment: Optional[Mapping[str, Any]],
 ) -> Union[str, Dict[str, Any]]:
+    """Normalize approval decisions into the JSON-RPC protocol encoding."""
     if isinstance(decision, Mapping):
         return dict(decision)
     if not isinstance(decision, str):
@@ -1109,6 +1126,7 @@ def _normalize_decision(
 
 
 def _extract_turn(notification: AppServerNotification) -> Optional[Dict[str, Any]]:
+    """Extract a turn object from a notification payload (best effort)."""
     params = notification.params
     if not isinstance(params, dict):
         return None
@@ -1121,6 +1139,7 @@ def _extract_turn(notification: AppServerNotification) -> Optional[Dict[str, Any
 
 
 async def _drain_stream(stream: asyncio.StreamReader, sink: list[str]) -> None:
+    """Continuously read a stream and append decoded lines to sink."""
     while True:
         chunk = await stream.readline()
         if not chunk:
@@ -1129,6 +1148,7 @@ async def _drain_stream(stream: asyncio.StreamReader, sink: list[str]) -> None:
 
 
 async def _iter_lines(stream: asyncio.StreamReader) -> AsyncGenerator[str, None]:
+    """Yield decoded lines from a stream until it is exhausted."""
     while True:
         line = await stream.readline()
         if not line:
