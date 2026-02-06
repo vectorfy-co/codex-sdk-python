@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from base64 import b64encode
 from contextlib import asynccontextmanager
-from dataclasses import InitVar, asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
@@ -37,7 +37,7 @@ try:
     from pydantic_ai.profiles import ModelProfile, ModelProfileSpec
     from pydantic_ai.settings import ModelSettings
     from pydantic_ai.tools import ToolDefinition
-    from pydantic_ai.usage import Usage as PydanticUsage
+    from pydantic_ai.usage import RequestUsage
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
@@ -290,24 +290,37 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@dataclass
 class CodexStreamedResponse(StreamedResponse):
     """Minimal streamed response wrapper for Codex model provider."""
 
-    _model_name: str
-    _parts: Sequence[Any]
-    _thread_id: str
-    _usage_init: InitVar[PydanticUsage]
-    _timestamp: datetime = field(default_factory=_now_utc, init=False)
-
-    def __post_init__(self, _usage_init: PydanticUsage) -> None:
-        """
-        Save the provided PydanticUsage into the instance's _usage attribute.
+    def __init__(
+        self,
+        *,
+        model_request_parameters: ModelRequestParameters,
+        model_name: str,
+        provider_name: Optional[str],
+        parts: Sequence[Any],
+        thread_id: str,
+        usage: RequestUsage,
+    ) -> None:
+        """Create a streamed response wrapper around precomputed Codex output.
 
         Args:
-            _usage_init: Usage information supplied as the dataclass InitVar.
+            model_request_parameters: The request parameters used for the call.
+            model_name: The model identifier reported to PydanticAI.
+            provider_name: Optional provider/system identifier (e.g. "openai").
+            parts: Collected response parts (text/tool-call parts).
+            thread_id: Codex thread identifier for debugging/traceability.
+            usage: Request usage totals for the response.
         """
-        self._usage = _usage_init
+        # `StreamedResponse` requires model_request_parameters and owns the parts manager.
+        super().__init__(model_request_parameters=model_request_parameters)
+        self._model_name = model_name
+        self._provider_name = provider_name
+        self._parts = parts
+        self._thread_id = thread_id
+        self._usage = usage
+        self._timestamp = _now_utc()
 
     async def _get_event_iterator(
         self,
@@ -344,14 +357,16 @@ class CodexStreamedResponse(StreamedResponse):
         Construct a complete model response from events received so far.
 
         Returns:
-            ModelResponse: Contains collected parts, the model name, timestamp, usage, and `vendor_details` with the Codex thread_id.
+            ModelResponse: Contains collected parts, the model name, timestamp, usage,
+            and `provider_details` with the Codex thread_id.
         """
         return ModelResponse(
             parts=self._parts_manager.get_parts(),
             model_name=self.model_name,
+            provider_name=self.provider_name,
             timestamp=self.timestamp,
             usage=self.usage(),
-            vendor_details={"thread_id": self._thread_id},
+            provider_details={"thread_id": self._thread_id},
         )
 
     @property
@@ -363,6 +378,16 @@ class CodexStreamedResponse(StreamedResponse):
             The model identifier string.
         """
         return self._model_name
+
+    @property
+    def provider_name(self) -> Optional[str]:
+        """
+        Return the provider/system name for the response, if set.
+
+        PydanticAI models can optionally report a provider separate from the model name.
+        For Codex, this is typically the `system` identifier used for routing/metadata.
+        """
+        return self._provider_name
 
     @property
     def timestamp(self) -> datetime:
@@ -444,7 +469,7 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-    ) -> tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
+    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
         """
         Run a Codex thread for the given conversation and request parameters, and parse the JSON envelope into response parts.
 
@@ -520,16 +545,14 @@ class CodexModel(Model):
                 prompt, output_schema=output_schema, turn_options=TurnOptions()
             )
 
-        usage = PydanticUsage(requests=1)
+        usage = RequestUsage()
         if parsed_turn.turn.usage is not None:
             cached = parsed_turn.turn.usage.cached_input_tokens
-            details = {"cached_input_tokens": cached} if cached else None
-            usage = PydanticUsage(
-                requests=1,
-                request_tokens=parsed_turn.turn.usage.input_tokens,
-                response_tokens=parsed_turn.turn.usage.output_tokens,
-                total_tokens=parsed_turn.turn.usage.input_tokens
-                + parsed_turn.turn.usage.output_tokens,
+            details = {"cached_input_tokens": cached} if cached else {}
+            usage = RequestUsage(
+                input_tokens=parsed_turn.turn.usage.input_tokens,
+                cache_read_tokens=cached,
+                output_tokens=parsed_turn.turn.usage.output_tokens,
                 details=details,
             )
 
@@ -568,7 +591,8 @@ class CodexModel(Model):
             model_request_parameters: Request-specific parameters that influence Codex execution.
 
         Returns:
-            ModelResponse containing the generated parts, usage information, the model name, and vendor_details with the Codex `thread_id`.
+            ModelResponse containing the generated parts, usage information, the model name,
+            and provider_details with the Codex `thread_id`.
         """
         parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
@@ -579,7 +603,8 @@ class CodexModel(Model):
             parts=parts,
             usage=usage,
             model_name=self.model_name,
-            vendor_details={"thread_id": thread_id},
+            provider_name=self.system,
+            provider_details={"thread_id": thread_id},
         )
 
     @asynccontextmanager
@@ -600,15 +625,17 @@ class CodexModel(Model):
         Returns:
             An async iterator that yields a single StreamedResponse (CodexStreamedResponse) containing the model name, response parts, usage information, and the Codex thread identifier.
         """
-        parts, usage, thread_id, _ = await self._run_codex_request(
+        parts, usage, thread_id, used_params = await self._run_codex_request(
             messages,
             model_settings,
             model_request_parameters,
         )
         streamed = CodexStreamedResponse(
-            _model_name=self.model_name,
-            _parts=parts,
-            _thread_id=thread_id,
-            _usage_init=usage,
+            model_request_parameters=used_params,
+            model_name=self.model_name,
+            provider_name=self.system,
+            parts=parts,
+            thread_id=thread_id,
+            usage=usage,
         )
         yield streamed

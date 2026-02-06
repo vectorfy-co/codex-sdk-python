@@ -42,7 +42,7 @@ ToolReturnPart = messages.ToolReturnPart
 UserPromptPart = messages.UserPromptPart
 ModelRequestParameters = models.ModelRequestParameters
 ToolDefinition = tools.ToolDefinition
-PydanticUsage = importlib.import_module("pydantic_ai.usage").Usage
+RequestUsage = importlib.import_module("pydantic_ai.usage").RequestUsage
 
 
 class FakeThread:
@@ -107,10 +107,9 @@ async def test_codex_model_returns_tool_calls():
     assert response.parts[0].tool_name == "add"
     assert response.parts[0].tool_call_id == "call_1"
     assert response.parts[0].args == '{"a":1,"b":2}'
-    assert response.usage.requests == 1
-    assert response.usage.request_tokens == 1
-    assert response.usage.response_tokens == 3
-    assert response.usage.total_tokens == 4
+    assert response.usage.input_tokens == 1
+    assert response.usage.cache_read_tokens == 2
+    assert response.usage.output_tokens == 3
     assert response.usage.details == {"cached_input_tokens": 2}
 
     # Schema should restrict tool names
@@ -195,7 +194,7 @@ async def test_codex_model_usage_defaults_when_thread_usage_missing() -> None:
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
     response = await model.request(reqs, None, params)
 
-    assert response.usage.requests == 1
+    assert response.usage == RequestUsage()
     assert response.parts and isinstance(response.parts[0], TextPart)
 
 
@@ -519,7 +518,8 @@ async def test_codex_model_request_stream_yields_response():
     assert len(response.parts) == 1
     assert isinstance(response.parts[0], TextPart)
     assert response.parts[0].content == "hello"
-    assert response.vendor_details == {"thread_id": "thread-123"}
+    assert response.provider_name == "openai"
+    assert response.provider_details == {"thread_id": "thread-123"}
 
 
 def test_codex_model_can_construct_codex_from_options():
@@ -530,14 +530,19 @@ def test_codex_model_can_construct_codex_from_options():
 async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
     """Streamed responses should emit events for tool calls and ignore other parts."""
     resp = CodexStreamedResponse(
-        _model_name="m",
-        _parts=[
+        model_request_parameters=ModelRequestParameters(
+            output_mode="text",
+            allow_text_output=True,
+        ),
+        model_name="m",
+        provider_name="openai",
+        parts=[
             ToolCallPart("t", args='{"x":1}', tool_call_id="call_1"),
             ThinkingPart("..."),
             TextPart("hello"),
         ],
-        _thread_id="thread-123",
-        _usage_init=PydanticUsage(requests=1),
+        thread_id="thread-123",
+        usage=RequestUsage(),
     )
     events = [event async for event in resp]
     assert events
