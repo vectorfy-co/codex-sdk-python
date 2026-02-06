@@ -171,15 +171,16 @@ class CodexExec:
         """
         Execute the Codex CLI with the provided arguments and stream each JSON output line as a UTF-8 decoded string.
 
-        Parameters:
-            args (CodexExecArgs): Structured arguments for the CLI invocation.
+        Args:
+            args: Structured arguments for the CLI invocation.
 
         Yields:
-            str: Each line of JSON output decoded as a UTF-8 string.
+            Each line of JSON output decoded as a UTF-8 string.
 
         Raises:
             CodexAbortError: If the operation is aborted via the provided signal.
-            CodexCLIError: If the CLI process exits with a non-zero status (includes captured stderr).
+            CodexCLIError: If the CLI process exits with a non-zero status (includes captured
+                stderr).
             CodexError: If the CLI cannot be spawned or is misconfigured.
         """
         command_args = ["exec", "--experimental-json"]
@@ -369,8 +370,8 @@ class CodexExec:
 
             async def watch_abort() -> None:
                 nonlocal aborted
-                if args.signal is None:
-                    return
+                # watch_abort is only scheduled when a signal is provided.
+                assert args.signal is not None
                 await args.signal.wait()
                 aborted = True
                 if process.returncode is None:

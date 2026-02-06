@@ -13,6 +13,7 @@ BaseModel = pydantic.BaseModel
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
+    CodexStreamedResponse,
     _build_envelope_schema,
     _final_from_envelope,
     _json_dumps,
@@ -41,6 +42,7 @@ ToolReturnPart = messages.ToolReturnPart
 UserPromptPart = messages.UserPromptPart
 ModelRequestParameters = models.ModelRequestParameters
 ToolDefinition = tools.ToolDefinition
+PydanticUsage = importlib.import_module("pydantic_ai.usage").Usage
 
 
 class FakeThread:
@@ -116,6 +118,98 @@ async def test_codex_model_returns_tool_calls():
         "name"
     ]["enum"]
     assert enum == ["add"]
+
+
+def test_render_tool_definitions_renders_optional_tool_fields() -> None:
+    """Cover optional tool attributes rendered via getattr()."""
+    func = ToolDefinition(name="func", description="d1")
+    func.sequential = True
+    func.metadata = {"x": 1}
+    func.timeout = 3.0
+
+    func_no_desc = ToolDefinition(name="func2", description=None)
+
+    out = ToolDefinition(name="out", description="d2")
+    out.sequential = True
+    out.metadata = {"y": 2}
+    out.timeout = 9
+
+    out_no_desc = ToolDefinition(name="out2", description=None)
+
+    rendered = _render_tool_definitions(
+        function_tools=[func, func_no_desc], output_tools=[out, out_no_desc]
+    )
+    assert "Function tools:" in rendered
+    assert (
+        "Output tools (use ONE of these to finish when text is not allowed):"
+        in rendered
+    )
+    assert "sequential: true" in rendered
+    assert "metadata:" in rendered
+    assert "timeout:" in rendered
+    assert "- func2" in rendered
+    assert "- out2" in rendered
+
+
+def test_codex_model_does_not_override_explicit_thread_options() -> None:
+    """Cover CodexModel.__init__ branches when thread options are preconfigured."""
+    profiles = importlib.import_module("pydantic_ai.profiles")
+
+    thread = FakeThread({"tool_calls": [], "final": "ok"})
+    codex = FakeCodex(thread)
+    thread_options = importlib.import_module("codex_sdk.options").ThreadOptions(
+        skip_git_repo_check=False,
+        sandbox_mode="workspace-write",
+        approval_policy="on-request",
+        web_search_mode="live",
+        network_access_enabled=True,
+    )
+
+    profile = profiles.ModelProfile(supports_tools=False)
+    model = CodexModel(codex=codex, thread_options=thread_options, profile=profile)
+
+    assert model.model_name == "codex"
+    assert thread_options.skip_git_repo_check is False
+    assert thread_options.sandbox_mode == "workspace-write"
+    assert thread_options.approval_policy == "on-request"
+    assert thread_options.web_search_mode == "live"
+    assert thread_options.network_access_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_codex_model_usage_defaults_when_thread_usage_missing() -> None:
+    """Cover the branch where turn.usage is None and we return minimal usage."""
+
+    class FakeThreadNoUsage(FakeThread):
+        async def run_json(self, prompt, *, output_schema, turn_options=None):
+            self.last_prompt = prompt
+            self.last_schema = output_schema
+            turn = Turn(items=[], final_response="", usage=None)
+            return ParsedTurn(turn=turn, output={"tool_calls": [], "final": "hi"})
+
+    thread = FakeThreadNoUsage({"tool_calls": [], "final": "hi"})
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+
+    reqs = [ModelRequest(parts=[UserPromptPart("hi")])]
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    response = await model.request(reqs, None, params)
+
+    assert response.usage.requests == 1
+    assert response.parts and isinstance(response.parts[0], TextPart)
+
+
+@pytest.mark.asyncio
+async def test_codex_model_request_without_history() -> None:
+    """Cover the prompt path where message history is empty."""
+    thread = FakeThread({"tool_calls": [], "final": "hello"})
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    response = await model.request([], None, params)
+
+    assert response.parts and isinstance(response.parts[0], TextPart)
 
 
 @pytest.mark.asyncio
@@ -430,3 +524,20 @@ async def test_codex_model_request_stream_yields_response():
 
 def test_codex_model_can_construct_codex_from_options():
     CodexModel(codex_options=CodexOptions(codex_path_override="codex-binary"))
+
+
+@pytest.mark.asyncio
+async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
+    """Streamed responses should emit events for tool calls and ignore other parts."""
+    resp = CodexStreamedResponse(
+        _model_name="m",
+        _parts=[
+            ToolCallPart("t", args='{"x":1}', tool_call_id="call_1"),
+            ThinkingPart("..."),
+            TextPart("hello"),
+        ],
+        _thread_id="thread-123",
+        _usage_init=PydanticUsage(requests=1),
+    )
+    events = [event async for event in resp]
+    assert events

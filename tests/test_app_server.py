@@ -120,6 +120,27 @@ async def test_app_server_initialize_and_request(
 
 
 @pytest.mark.asyncio
+async def test_app_server_close_skips_terminate_when_process_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the subprocess already exited, close() should not try to terminate it."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    # Pretend the process already exited.
+    process.returncode = 0
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_app_server_initialize_with_experimental_capabilities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -150,6 +171,28 @@ async def test_app_server_initialize_with_experimental_capabilities(
 
     stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
     await init_task
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_initialize_starts_process_when_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """initialize() should start the subprocess when called before start()."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    init_task = asyncio.create_task(client.initialize())
+    await asyncio.sleep(0)
+    stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
+    result = await init_task
+    assert result["userAgent"] == "codex"
     await client.close()
 
 
@@ -269,6 +312,11 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "thread/loaded/list", {"data": ["t1"]})
     assert payload["params"] == {"cursor": "c", "limit": 1}
 
+    # Cover the empty-params branch (params should be omitted).
+    task = asyncio.create_task(client.thread_loaded_list())
+    _, payload = await expect_request(task, "thread/loaded/list", {"data": []})
+    assert "params" not in payload
+
     task = asyncio.create_task(client.config_requirements_read())
     _, payload = await expect_request(
         task, "configRequirements/read", {"requirements": None}
@@ -308,6 +356,11 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"]["modelProviders"] == ["openai"]
     assert payload["params"]["sourceKinds"] == ["cli"]
     assert payload["params"]["archived"] is True
+
+    # Cover thread_list with no filters (params should be omitted).
+    task = asyncio.create_task(client.thread_list())
+    _, payload = await expect_request(task, "thread/list", {"data": []})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.thread_read("t1", include_turns=True))
     _, payload = await expect_request(task, "thread/read", {"thread": {"id": "t1"}})
@@ -367,6 +420,11 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "skills/list", {"data": []})
     assert payload["params"]["forceReload"] is True
 
+    # Cover skills_list without cwds.
+    task = asyncio.create_task(client.skills_list(force_reload=False))
+    _, payload = await expect_request(task, "skills/list", {"data": []})
+    assert payload["params"] == {"forceReload": False}
+
     task = asyncio.create_task(client.skills_remote_read())
     _, payload = await expect_request(task, "skills/remote/read", {"data": []})
     assert payload["params"] == {}
@@ -391,13 +449,30 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "review/start", {"turn": {"id": "turn_r"}})
     assert payload["params"]["threadId"] == "t1"
 
+    # Cover review_start without delivery.
+    task = asyncio.create_task(
+        client.review_start("t1", target={"type": "uncommittedChanges"})
+    )
+    _, payload = await expect_request(task, "review/start", {"turn": {"id": "turn_r"}})
+    assert payload["params"]["threadId"] == "t1"
+
     task = asyncio.create_task(client.model_list(cursor="m", limit=1))
     _, payload = await expect_request(task, "model/list", {"data": []})
     assert payload["params"] == {"cursor": "m", "limit": 1}
 
+    # Cover model_list with no cursor/limit.
+    task = asyncio.create_task(client.model_list())
+    _, payload = await expect_request(task, "model/list", {"data": []})
+    assert "params" not in payload
+
     task = asyncio.create_task(client.app_list(cursor="a", limit=2))
     _, payload = await expect_request(task, "app/list", {"data": []})
     assert payload["params"] == {"cursor": "a", "limit": 2}
+
+    # Cover app_list with no cursor/limit.
+    task = asyncio.create_task(client.app_list())
+    _, payload = await expect_request(task, "app/list", {"data": []})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.collaboration_mode_list())
     _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
@@ -415,6 +490,11 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"]["command"] == ["echo", "hi"]
     assert payload["params"]["sandboxPolicy"] == {"allow": True}
 
+    # Cover command_exec with only required args.
+    task = asyncio.create_task(client.command_exec(command=["echo", "hi"]))
+    _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
+    assert payload["params"] == {"command": ["echo", "hi"]}
+
     task = asyncio.create_task(
         client.mcp_server_oauth_login(name="server", scopes=["a"])
     )
@@ -423,6 +503,13 @@ async def test_app_server_methods_and_input_normalization(
     )
     assert payload["params"]["name"] == "server"
 
+    # Cover oauth_login without scopes.
+    task = asyncio.create_task(client.mcp_server_oauth_login(name="server"))
+    _, payload = await expect_request(
+        task, "mcpServer/oauth/login", {"authorizationUrl": "x"}
+    )
+    assert payload["params"] == {"name": "server"}
+
     task = asyncio.create_task(client.mcp_server_refresh())
     _, payload = await expect_request(task, "config/mcpServer/reload", {})
     assert "params" not in payload
@@ -430,6 +517,11 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.mcp_server_status_list(cursor="c", limit=1))
     _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})
     assert payload["params"] == {"cursor": "c", "limit": 1}
+
+    # Cover status list with no params.
+    task = asyncio.create_task(client.mcp_server_status_list())
+    _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})
+    assert "params" not in payload
 
     task = asyncio.create_task(
         client.account_login_start(params={"type": "apiKey", "apiKey": "key"})
@@ -630,6 +722,29 @@ async def test_app_server_reader_loop_records_unknown_messages(
 
     with pytest.raises(CodexError):
         await client.request("noop")
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_reader_loop_exits_on_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover the normal reader-loop shutdown path when stdout closes."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    # End the stream (empty bytes) so _iter_lines terminates.
+    stdout._queue.put_nowait(b"")
+    await asyncio.sleep(0)
 
     await client.close()
 

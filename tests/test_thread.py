@@ -728,3 +728,104 @@ def test_normalize_input_collects_images():
     )
     assert prompt == "hello"
     assert images == ["/tmp/a.png"]
+
+
+def test_normalize_input_ignores_unknown_item_types() -> None:
+    """Unknown input items should be ignored rather than raising."""
+    prompt, images = normalize_input(
+        [
+            {"type": "text", "text": "hello"},
+            {"type": "unknown", "value": "ignored"},
+        ]
+    )
+    assert prompt == "hello"
+    assert images == []
+
+
+class FakeExecNoop:
+    async def run(self, _args: Any):
+        if False:  # pragma: no cover
+            yield ""
+
+
+def test_parse_item_ignores_invalid_collab_agent_states_and_web_search_types() -> None:
+    """Ensure defensive parsing ignores invalid inputs without raising."""
+    thread = Thread(FakeExecNoop(), CodexOptions(), ThreadOptions())
+
+    # Invalid agent state key/value should be ignored.
+    item = thread._parse_item(
+        {
+            "id": "item-1",
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "sender_thread_id": "t0",
+            "receiver_thread_ids": ["t1"],
+            "prompt": None,
+            "agents_states": {
+                1: {"status": "running"},  # invalid key type
+                "agent": {"status": 123},  # invalid status type
+            },
+            "status": "completed",
+        }
+    )
+    assert item.type == "collab_tool_call"
+    assert item.agents_states == {}
+
+    # Non-string query should be coerced to empty string.
+    web = thread._parse_item({"id": "w1", "type": "web_search", "query": 123})
+    assert web.query == ""
+
+
+def test_parse_item_handles_collab_tool_call_with_missing_collections() -> None:
+    """Cover branches when optional collab fields are present but wrong types."""
+    thread = Thread(FakeExecNoop(), CodexOptions(), ThreadOptions())
+    item = thread._parse_item(
+        {
+            "id": "item-2",
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "sender_thread_id": "t0",
+            "receiver_thread_ids": "not-a-list",
+            "prompt": 123,
+            "agents_states": "not-a-dict",
+            "status": "completed",
+        }
+    )
+    assert item.type == "collab_tool_call"
+    assert item.receiver_thread_ids == []
+    assert item.prompt is None
+    assert item.agents_states == {}
+
+
+@pytest.mark.asyncio
+async def test_run_with_hooks_with_explicit_turn_options_and_non_message_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover run_with_hooks() branches when turn_options is provided and final_response stays empty."""
+
+    from codex_sdk.events import (
+        ItemCompletedEvent,
+        TurnCompletedEvent,
+        TurnStartedEvent,
+    )
+
+    exec = FakeExecSequence([[]])
+    thread = Thread(exec, CodexOptions(), ThreadOptions())
+
+    todo = TodoListItem(
+        id="t", type="todo_list", items=[TodoItem(text="x", completed=False)]
+    )
+
+    async def fake_stream(_input: Any, _turn_options: Any):
+        yield TurnStartedEvent(type="turn.started")
+        yield ItemCompletedEvent(type="item.completed", item=todo)
+        yield TurnCompletedEvent(type="turn.completed", usage=Usage(1, 0, 2))
+
+    monkeypatch.setattr(thread, "_run_streamed_internal", fake_stream)
+
+    calls: List[str] = []
+    hooks = ThreadHooks(on_item_completed=lambda _evt: calls.append("item_completed"))
+    turn = await thread.run_with_hooks("hi", hooks=hooks, turn_options=TurnOptions())
+
+    assert turn.final_response == ""
+    assert calls == ["item_completed"]

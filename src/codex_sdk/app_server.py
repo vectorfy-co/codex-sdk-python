@@ -374,11 +374,12 @@ class AppServerClient:
 
         Ensures the underlying subprocess is started, sends an `initialize` request containing the provided (or default) client information and the experimental API capability when enabled, then emits an `initialized` notification.
 
-        Parameters:
-            client_info (Optional[AppServerClientInfo]): Client identity to register; if omitted a default client identity is used.
+        Args:
+            client_info: Client identity to register; if omitted, a default client identity is
+                used.
 
         Returns:
-            result (Dict[str, Any]): The response payload returned by the app-server for the `initialize` request.
+            The response payload returned by the app-server for the `initialize` request.
         """
         if self._process is None:
             await self.start()
@@ -503,16 +504,18 @@ class AppServerClient:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
 
-        Parameters:
-            cursor (Optional[str]): Pagination cursor to continue listing from.
-            limit (Optional[int]): Maximum number of threads to return.
-            sort_key (Optional[str]): Key to sort results by (server-defined).
-            model_providers (Optional[Sequence[str]]): Filter threads by one or more model provider identifiers.
-            source_kinds (Optional[Sequence[str]]): Filter threads by one or more source kinds.
-            archived (Optional[bool]): If set, restrict results to archived (`True`) or unarchived (`False`) threads.
+        Args:
+            cursor: Pagination cursor to continue listing from.
+            limit: Maximum number of threads to return.
+            sort_key: Key to sort results by (server-defined).
+            model_providers: Filter threads by one or more model provider identifiers.
+            source_kinds: Filter threads by one or more source kinds.
+            archived: If set, restrict results to archived (`True`) or unarchived (`False`)
+                threads.
 
         Returns:
-            Dict[str, Any]: The raw response dictionary returned by the app-server for the `thread/list` request.
+            The raw response dictionary returned by the app-server for the `thread/list`
+            request.
         """
         params: Dict[str, Any] = {}
         if cursor is not None:
@@ -539,11 +542,11 @@ class AppServerClient:
         """
         Archive the thread identified by `thread_id`.
 
-        Parameters:
-                thread_id (str): Identifier of the thread to archive.
+        Args:
+            thread_id: Identifier of the thread to archive.
 
         Returns:
-                response (Dict[str, Any]): The app-server's response payload for the archive operation.
+            The app-server's response payload for the archive operation.
         """
         return await self._request_dict("thread/archive", {"threadId": thread_id})
 
@@ -551,12 +554,12 @@ class AppServerClient:
         """
         Set the display name for a thread.
 
-        Parameters:
-            thread_id (str): Identifier of the thread to rename.
-            name (str): New name to assign to the thread.
+        Args:
+            thread_id: Identifier of the thread to rename.
+            name: New name to assign to the thread.
 
         Returns:
-            result (dict): Response payload returned by the app-server.
+            Response payload returned by the app-server.
         """
         return await self._request_dict(
             "thread/name/set", {"threadId": thread_id, "name": name}
@@ -656,12 +659,14 @@ class AppServerClient:
         """
         List skills available to the app-server, optionally scoped to specific working directories.
 
-        Parameters:
-            cwds (Optional[Sequence[Union[str, Path]]]): Sequence of directory paths to scope the skills listing; each path will be converted to a string. If omitted, the server uses its default scope.
-            force_reload (bool): If true, instructs the server to reload skill data before returning results.
+        Args:
+            cwds: Sequence of directory paths to scope the skills listing; each path will be
+                converted to a string. If omitted, the server uses its default scope.
+            force_reload: If true, instructs the server to reload skill data before returning
+                results.
 
         Returns:
-            dict: The parsed response payload from the `skills/list` app-server method.
+            The parsed response payload from the `skills/list` app-server method.
         """
         payload: Dict[str, Any] = {"force_reload": force_reload}
         if cwds:
@@ -683,12 +688,12 @@ class AppServerClient:
         """
         Start a remote skill write operation for a Hazelnut package.
 
-        Parameters:
-            hazelnut_id (str): Identifier of the remote Hazelnut skill to write.
-            is_preload (bool): Whether the skill should be marked as a preload.
+        Args:
+            hazelnut_id: Identifier of the remote Hazelnut skill to write.
+            is_preload: Whether the skill should be marked as a preload.
 
         Returns:
-            dict: Result returned by the app-server for the "skills/remote/write" request.
+            Result returned by the app-server for the "skills/remote/write" request.
         """
         payload = {"hazelnut_id": hazelnut_id, "is_preload": is_preload}
         return await self._request_dict("skills/remote/write", _coerce_keys(payload))
@@ -697,12 +702,12 @@ class AppServerClient:
         """
         Set the enabled state of a skill configuration at the given path.
 
-        Parameters:
-            path (str): The configuration path identifying the skill.
-            enabled (bool): True to enable the skill at the path, False to disable it.
+        Args:
+            path: The configuration path identifying the skill.
+            enabled: True to enable the skill at the path, False to disable it.
 
         Returns:
-            dict: The app-server response as a dictionary.
+            The app-server response as a dictionary.
         """
         payload = {"path": path, "enabled": enabled}
         return await self._request_dict("skills/config/write", payload)
@@ -716,13 +721,15 @@ class AppServerClient:
         """
         Start a new turn in the specified thread using the provided user input.
 
-        Parameters:
-            thread_id (str): Identifier of the thread to start the turn in.
-            input (AppServerInput): User input for the turn; may be a string or a sequence of input items and will be normalized to the app-server format.
-            **params: Additional optional request parameters; keys with None values are omitted and snake_case keys are converted to camelCase.
+        Args:
+            thread_id: Identifier of the thread to start the turn in.
+            input: User input for the turn; may be a string or a sequence of input items and
+                will be normalized to the app-server format.
+            **params: Additional optional request parameters; keys with None values are omitted
+                and snake_case keys are converted to camelCase.
 
         Returns:
-            dict: The app-server's response payload for the started turn.
+            The app-server's response payload for the started turn.
         """
         payload = {"threadId": thread_id, "input": normalize_app_server_input(input)}
         payload.update(_coerce_keys(params))

@@ -118,12 +118,13 @@ def _render_tool_definitions(
 
     Produces a newline-separated block that lists each tool with name, optional description, kind, parameters JSON schema, and optional fields such as outer_typed_dict_key, strict, sequential, metadata, and timeout. Function tools are listed under "Function tools:" and output tools under "Output tools (use ONE of these to finish when text is not allowed):".
 
-    Parameters:
-        function_tools (Sequence[ToolDefinition]): Tool definitions intended to be called as functions.
-        output_tools (Sequence[ToolDefinition]): Tool definitions intended as final output options when direct text is disallowed.
+    Args:
+        function_tools: Tool definitions intended to be called as functions.
+        output_tools: Tool definitions intended as final output options when direct text
+            is disallowed.
 
     Returns:
-        str: The rendered, trimmed multi-line string describing the tools.
+        The rendered, trimmed multi-line string describing the tools.
     """
     lines: List[str] = []
     if function_tools:
@@ -303,8 +304,8 @@ class CodexStreamedResponse(StreamedResponse):
         """
         Save the provided PydanticUsage into the instance's _usage attribute.
 
-        Parameters:
-            _usage_init (PydanticUsage): Usage information supplied as the dataclass InitVar.
+        Args:
+            _usage_init: Usage information supplied as the dataclass InitVar.
         """
         self._usage = _usage_init
 
@@ -433,17 +434,20 @@ class CodexModel(Model):
         """
         Run a Codex thread for the given conversation and request parameters, and parse the JSON envelope into response parts.
 
-        Parameters:
-            messages (list[ModelMessage]): Conversation messages to include in the Codex prompt.
-            model_settings (Optional[ModelSettings]): Ignored by this implementation.
-            model_request_parameters (ModelRequestParameters): Controls function/output tool definitions, whether text output is allowed, and may be customized before the request.
+        Args:
+            messages: Conversation messages to include in the Codex prompt.
+            model_settings: Ignored by this implementation.
+            model_request_parameters: Controls function/output tool definitions, whether
+                text output is allowed, and may be customized before the request.
 
         Returns:
-            tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
-                - parts: A list of response parts produced from the envelope (e.g., ToolCallPart instances for tool calls or TextPart for final text).
-                - usage: Usage information for the request as a PydanticUsage instance.
-                - thread_id: The Codex thread identifier used for the request.
-                - model_request_parameters: The (possibly customized) ModelRequestParameters actually used for the request.
+            Tuple of `(parts, usage, thread_id, model_request_parameters)`:
+            - `parts`: Response parts parsed from the envelope (ToolCallPart for tool calls
+              or TextPart for final text).
+            - `usage`: Usage information for the request.
+            - `thread_id`: The Codex thread identifier used for the request.
+            - `model_request_parameters`: The (possibly customized) request parameters
+              actually used for the request.
         """
         del model_settings
         model_request_parameters = self.customize_request_parameters(
@@ -544,7 +548,7 @@ class CodexModel(Model):
         """
         Send the provided message history to Codex and return a ModelResponse containing the model output and metadata.
 
-        Parameters:
+        Args:
             messages: The conversation as a list of ModelMessage objects to send to the model.
             model_settings: Optional model configuration (may be ignored by the Codex backend).
             model_request_parameters: Request-specific parameters that influence Codex execution.
@@ -574,7 +578,7 @@ class CodexModel(Model):
         """
         Produce an asynchronous stream that yields a Codex-backed streamed model response for the given message sequence.
 
-        Parameters:
+        Args:
             messages: Conversation messages to send to the model.
             model_settings: Model-specific settings (may be None).
             model_request_parameters: Additional request parameters controlling the model call.
