@@ -725,7 +725,7 @@ dev = [
 requires-dist = [
     { name = "logfire-api", marker = "extra == 'logfire'", specifier = ">=4" },
     { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2" },
-    { name = "pydantic-ai", marker = "python_full_version >= '3.10' and extra == 'pydantic-ai'" },
+    { name = "pydantic-ai", marker = "python_full_version >= '3.10' and extra == 'pydantic-ai'", specifier = ">=0.8.1" },
 ]
 provides-extras = ["pydantic", "pydantic-ai", "logfire"]
 
@@ -736,7 +736,7 @@ dev = [
     { name = "isort", specifier = ">=5.0" },
     { name = "mypy", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-ai", marker = "python_full_version >= '3.10'" },
+    { name = "pydantic-ai", marker = "python_full_version >= '3.10'", specifier = ">=0.8.1" },
     { name = "pytest", specifier = ">=7.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.0" },
