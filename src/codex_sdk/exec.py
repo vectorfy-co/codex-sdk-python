@@ -88,6 +88,16 @@ class CodexExec:
         executable_path: Optional[str] = None,
         env: Optional[Mapping[str, str]] = None,
     ):
+        """Create a Codex CLI executor.
+
+        Args:
+            executable_path: Optional explicit path to the `codex` binary. If omitted,
+                the SDK will locate the vendored binary for the current platform and
+                fall back to PATH.
+            env: Optional environment overrides to use when spawning the CLI. When
+                provided, only these variables are passed (plus required Codex SDK
+                metadata).
+        """
         self.executable_path = executable_path or self._find_codex_path()
         self._env_override = dict(env) if env is not None else None
         self._ensure_executable()
@@ -169,17 +179,19 @@ class CodexExec:
 
     async def run(self, args: CodexExecArgs) -> AsyncGenerator[str, None]:
         """
-        Run the Codex CLI with the given arguments and yield decoded output lines.
+        Execute the Codex CLI with the provided arguments and stream each JSON output line as a UTF-8 decoded string.
 
         Args:
             args: Structured arguments for the CLI invocation.
 
         Yields:
-            Each line of JSON output as a UTF-8 decoded string.
+            Each line of JSON output decoded as a UTF-8 string.
 
         Raises:
-            CodexCLIError: If the CLI exits with a non-zero status.
-            CodexError: If the CLI cannot be spawned or misconfigured.
+            CodexAbortError: If the operation is aborted via the provided signal.
+            CodexCLIError: If the CLI process exits with a non-zero status (includes captured
+                stderr).
+            CodexError: If the CLI cannot be spawned or is misconfigured.
         """
         command_args = ["exec", "--experimental-json"]
 
@@ -226,10 +238,9 @@ class CodexExec:
             )
 
         if args.max_threads is not None:
-            if args.max_threads > 6:
+            if args.max_threads < 1:
                 raise CodexError(
-                    "max_threads cannot exceed 6 in Codex 0.91.0+; "
-                    f"received {args.max_threads}."
+                    f"max_threads must be at least 1; received {args.max_threads}."
                 )
             command_args.extend(["--config", f"agents.max_threads={args.max_threads}"])
 
@@ -315,12 +326,15 @@ class CodexExec:
                 ["--config", f'approval_policy="{args.approval_policy}"']
             )
 
+        if args.thread_id:
+            command_args.extend(["resume", args.thread_id])
+
+        # When resuming, ensure resume args come before `--image` flags.
+        # `--image <FILE>...` accepts multiple values and can greedily consume
+        # positional tokens like "resume" if placed earlier.
         if args.images:
             for image in args.images:
                 command_args.extend(["--image", image])
-
-        if args.thread_id:
-            command_args.extend(["resume", args.thread_id])
 
         if self._env_override is not None:
             env = dict(self._env_override)
@@ -366,8 +380,8 @@ class CodexExec:
 
             async def watch_abort() -> None:
                 nonlocal aborted
-                if args.signal is None:
-                    return
+                # watch_abort is only scheduled when a signal is provided.
+                assert args.signal is not None
                 await args.signal.wait()
                 aborted = True
                 if process.returncode is None:
@@ -485,13 +499,16 @@ async def _iter_lines(stream: asyncio.StreamReader) -> AsyncGenerator[str, None]
 
 
 def _write_schema_file(path: str, schema: Mapping[str, Any]) -> None:
+    """Write an output schema to disk as JSON."""
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(dict(schema), handle)
 
 
 def _cleanup_dir(path: str) -> None:
+    """Remove a temporary directory."""
     shutil.rmtree(path, ignore_errors=True)
 
 
 async def _noop() -> None:
+    """A no-op awaitable used as a safe cleanup callback."""
     return None

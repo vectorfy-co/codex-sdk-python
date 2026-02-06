@@ -7,6 +7,7 @@ for use with the Python SDK.
 """
 
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -52,7 +53,18 @@ def check_dependencies():
 
 
 def download_codex_package():
-    """Download the codex-sdk npm package."""
+    """
+    Download and extract the codex-sdk npm package into a temporary directory.
+    
+    Uses the resolved npm package spec, runs `npm pack` to download a tarball, extracts it, and returns the path to the extracted package directory. On error, the temporary download directory is removed and the exception is re-raised.
+    
+    Returns:
+        package_dir (Path): Path to the extracted package directory named like "package".
+    
+    Raises:
+        RuntimeError: If no tarball is found after `npm pack` or no package directory is found after extraction.
+        Exception: Propagates other exceptions encountered during download or extraction.
+    """
     print("Downloading codex-sdk package...")
 
     # Create a temporary directory for the download
@@ -61,7 +73,9 @@ def download_codex_package():
 
     try:
         # Download the package
-        run_command(["npm", "pack", "@openai/codex-sdk"], cwd=temp_dir)
+        package_spec = resolve_codex_sdk_npm_spec()
+        print(f"Using npm package: {package_spec}")
+        run_command(["npm", "pack", package_spec], cwd=temp_dir)
 
         # Find the downloaded tarball
         tarball_files = list(temp_dir.glob("*.tgz"))
@@ -225,7 +239,14 @@ def print_next_steps():
 
 
 def main():
-    """Main setup function."""
+    """
+    Orchestrates the SDK binary setup workflow, performs installation steps, and reports success or failure.
+    
+    Performs dependency verification, downloads the codex-sdk npm package, installs the package's vendor files into the SDK tree, verifies and tests the platform-specific codex binary, cleans up temporary files, and prints post-setup instructions and progress/error messages to stdout.
+    
+    Returns:
+        int: `0` on success, `1` on failure.
+    """
     print("Codex Python SDK Setup")
     print("=" * 40)
     print()
@@ -268,6 +289,53 @@ def main():
         print("2. Check your internet connection")
         print("3. Try running: conda install nodejs")
         return 1
+
+
+def resolve_codex_sdk_npm_spec() -> str:
+    """
+    Build the npm package spec for @openai/codex-sdk, using the repository pyproject version when available.
+    
+    Reads the repository pyproject.toml to find the [project].version; if a version is found returns "@openai/codex-sdk@<version>", otherwise returns "@openai/codex-sdk".
+    
+    Returns:
+        str: The npm package spec to pass to npm (e.g. "@openai/codex-sdk@1.2.3" or "@openai/codex-sdk").
+    """
+    sdk_dir = Path(__file__).resolve().parent.parent
+    pyproject_path = sdk_dir / "pyproject.toml"
+    version = read_pyproject_version(pyproject_path)
+    if version:
+        return f"@openai/codex-sdk@{version}"
+    return "@openai/codex-sdk"
+
+
+def read_pyproject_version(pyproject_path: Path) -> str:
+    """
+    Extract the value of [project].version from a pyproject.toml file in a best-effort manner.
+    
+    Searches the file for a top-level [project] section and returns the value from a `version = "..."` or `version = '...'` line within that section. This is a simple text-based extraction (no TOML parser) and may not handle complex or nonstandard TOML constructs.
+    
+    Parameters:
+        pyproject_path (Path): Path to the pyproject.toml file to read.
+    
+    Returns:
+        str: The version string if found, otherwise an empty string.
+    """
+    if not pyproject_path.exists():
+        return ""
+
+    in_project = False
+    version_re = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']\s*$')
+    for line in pyproject_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project:
+            match = version_re.match(stripped)
+            if match:
+                return match.group(1)
+
+    return ""
 
 
 if __name__ == "__main__":

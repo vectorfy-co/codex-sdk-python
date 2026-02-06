@@ -5,7 +5,7 @@ Based on item types from codex-rs/exec/src/exec_events.rs
 """
 
 from dataclasses import dataclass
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Literal, Mapping, Optional, Union
 
 # The status of a command execution
 CommandExecutionStatus = Literal["in_progress", "completed", "failed", "declined"]
@@ -18,6 +18,30 @@ PatchApplyStatus = Literal["in_progress", "completed", "failed"]
 
 # The status of an MCP tool call
 McpToolCallStatus = Literal["in_progress", "completed", "failed"]
+
+# The status of a collaboration tool call
+CollabToolCallStatus = Literal["in_progress", "completed", "failed"]
+
+# Supported collaboration tools
+CollabTool = Literal["spawn_agent", "send_input", "wait", "close_agent"]
+
+# The status of a collaboration agent
+CollabAgentStatus = Literal[
+    "pending_init",
+    "running",
+    "completed",
+    "errored",
+    "shutdown",
+    "not_found",
+]
+
+
+@dataclass
+class CollabAgentState:
+    """Last known state of a collaboration agent."""
+
+    status: CollabAgentStatus
+    message: Optional[str] = None
 
 
 @dataclass
@@ -101,13 +125,35 @@ class McpToolCallItem:
 
 @dataclass
 class McpToolCallItemResult:
+    """Successful result payload returned by an MCP tool call."""
+
     content: List[Any]
     structured_content: Optional[Any] = None
 
 
 @dataclass
 class McpToolCallItemError:
+    """Error payload returned by a failed MCP tool call."""
+
     message: str
+
+
+@dataclass
+class CollabToolCallItem:
+    """
+    Represents a call to a collaboration tool. The item starts when the tool is invoked and
+    completes when the tool reports success or failure.
+    """
+
+    id: str
+    type: Literal["collab_tool_call"]
+
+    tool: CollabTool
+    sender_thread_id: str
+    receiver_thread_ids: List[str]
+    prompt: Optional[str]
+    agents_states: Mapping[str, CollabAgentState]
+    status: CollabToolCallStatus
 
 
 @dataclass
@@ -137,6 +183,7 @@ class WebSearchItem:
     id: str
     type: Literal["web_search"]
     query: str
+    action: Optional[Any] = None
 
 
 @dataclass
@@ -167,6 +214,7 @@ ThreadItem = Union[
     CommandExecutionItem,
     FileChangeItem,
     McpToolCallItem,
+    CollabToolCallItem,
     WebSearchItem,
     TodoListItem,
     ErrorItem,
