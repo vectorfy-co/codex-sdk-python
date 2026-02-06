@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("pydantic_ai", exc_type=ImportError)
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai import (
     CodexHandoff,
