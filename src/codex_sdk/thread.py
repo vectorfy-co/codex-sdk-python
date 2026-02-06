@@ -54,15 +54,19 @@ class Turn:
     usage: Optional[Usage]
 
     def agent_messages(self) -> List[AgentMessageItem]:
+        """Return agent message items recorded during the turn."""
         return [item for item in self.items if item.type == "agent_message"]
 
     def reasoning(self) -> List[ReasoningItem]:
+        """Return reasoning items recorded during the turn."""
         return [item for item in self.items if item.type == "reasoning"]
 
     def commands(self) -> List[CommandExecutionItem]:
+        """Return command execution items recorded during the turn."""
         return [item for item in self.items if item.type == "command_execution"]
 
     def file_changes(self) -> List[FileChangeItem]:
+        """Return file change items recorded during the turn."""
         return [item for item in self.items if item.type == "file_change"]
 
     def mcp_tool_calls(self) -> List[McpToolCallItem]:
@@ -93,9 +97,11 @@ class Turn:
         return [item for item in self.items if item.type == "web_search"]
 
     def todo_lists(self) -> List[TodoListItem]:
+        """Return todo list items recorded during the turn."""
         return [item for item in self.items if item.type == "todo_list"]
 
     def errors(self) -> List[ErrorItem]:
+        """Return error items recorded during the turn."""
         return [item for item in self.items if item.type == "error"]
 
 
@@ -155,6 +161,14 @@ class Thread:
         thread_options: ThreadOptions,
         thread_id: Optional[str] = None,
     ):
+        """Create a thread wrapper around a Codex execution backend.
+
+        Args:
+            exec: Executor used to spawn and communicate with the Codex CLI.
+            options: Codex client-level options.
+            thread_options: Per-thread defaults (model, sandbox, web search, etc.).
+            thread_id: Optional existing thread id to resume.
+        """
         self._exec = exec
         self._options = options
         self._id = thread_id
