@@ -37,7 +37,7 @@ pydantic = [
     "pydantic>=2",
 ]
 pydantic-ai = [
-    "pydantic-ai; python_version >= '3.10'",
+    "pydantic-ai>=0.8.1; python_version >= '3.10'",
 ]
 logfire = [
     # `pydantic-ai` imports the `logfire` module, which is provided by the
@@ -52,7 +52,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0",
     "pydantic>=2",
-    "pydantic-ai; python_version >= '3.10'",
+    "pydantic-ai>=0.8.1; python_version >= '3.10'",
     "black>=22.0",
     "isort>=5.0",
     "mypy>=1.0",
