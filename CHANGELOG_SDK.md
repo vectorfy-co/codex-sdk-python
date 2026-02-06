@@ -18,6 +18,8 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
   (resume args now precede image args to avoid greedy flag parsing).
 - `max_threads` validation now only enforces `>= 1` (Codex defaults to 6; this is not a hard cap).
 - PydanticAI integration updated for `pydantic-ai` 0.6.x.
+- Fixed `logfire` optional dependency to avoid shadowing Pydantic's Logfire packages in CI,
+  which prevented `pydantic_ai` from importing and caused coverage failures.
 - `scripts/setup_binary.py` now pins the npm download to `@openai/codex-sdk@<pyproject version>`
   so vendor binaries match the SDK version.
 - Bundled Codex CLI vendor binaries updated to 0.98.0 via `scripts/setup_binary.py`.

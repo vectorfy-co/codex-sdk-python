@@ -4,7 +4,7 @@ import importlib
 import pytest
 
 pydantic = pytest.importorskip("pydantic")
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
 
 from codex_sdk.events import Usage
