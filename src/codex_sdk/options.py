@@ -14,7 +14,7 @@ SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 
 ModelReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
 WebSearchMode = Literal["disabled", "cached", "live"]
-ModelPersonality = Literal["friendly", "pragmatic"]
+ModelPersonality = Literal["friendly", "pragmatic", "none"]
 
 
 @dataclass
@@ -60,7 +60,7 @@ class ThreadOptions:
         model_instructions_file: Optional path to a file containing model instructions.
         model_personality: Optional personality preset for the model.
         max_threads: Maximum number of concurrent threads allowed by the agent
-            (capped at 6 in Codex 0.91.0+).
+            (defaults to the CLI's configured value; the CLI currently defaults to 6).
         network_access_enabled: Enable/disable network access in workspace-write sandbox.
         web_search_mode: Web search mode ("disabled", "cached", or "live").
         web_search_enabled: Enable/disable web search feature.

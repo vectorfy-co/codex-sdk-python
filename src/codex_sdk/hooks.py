@@ -60,6 +60,7 @@ async def dispatch_event(hooks: ThreadHooks, event: ThreadEvent) -> None:
 
 
 async def _dispatch_item_hooks(hooks: ThreadHooks, item: ThreadItem) -> None:
+    """Dispatch item-specific hooks for an item event."""
     await _maybe_call(hooks.on_item, item)
     if hooks.on_item_type:
         hook = hooks.on_item_type.get(item.type)
@@ -67,6 +68,7 @@ async def _dispatch_item_hooks(hooks: ThreadHooks, item: ThreadItem) -> None:
 
 
 async def _maybe_call(func: Optional[Hook], arg: Any) -> None:
+    """Invoke a hook that may be sync or async."""
     if func is None:
         return
     result = func(arg)

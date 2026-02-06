@@ -18,6 +18,7 @@ class CodexCLIError(CodexError):
     stderr: str
 
     def __post_init__(self) -> None:
+        """Format the exception message from the exit code and stderr."""
         message = f"Codex CLI exited with code {self.exit_code}"
         if self.stderr:
             message = f"{message}: {self.stderr}"
@@ -36,6 +37,12 @@ class TurnFailedError(CodexError):
     """Raised when a turn ends with a `turn.failed` event."""
 
     def __init__(self, message: str, *, error: Optional[object] = None) -> None:
+        """Create a TurnFailedError and optionally attach a parsed error payload.
+
+        Args:
+            message: Human-readable error message.
+            error: Optional error object emitted by the stream.
+        """
         super().__init__(message)
         self.error = error
 
@@ -49,6 +56,7 @@ class CodexAppServerError(CodexError):
     data: Optional[object] = None
 
     def __post_init__(self) -> None:
+        """Format the exception message from the JSON-RPC error payload."""
         detail = f"Codex app-server error {self.code}: {self.message}"
         if self.data is not None:
             detail = f"{detail} ({self.data})"

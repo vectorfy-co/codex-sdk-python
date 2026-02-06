@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("pydantic_ai", exc_type=ImportError)
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai import (
     CodexHandoff,
@@ -25,6 +25,7 @@ from codex_sdk.items import (
     TodoListItem,
     WebSearchItem,
 )
+from codex_sdk.options import ThreadOptions
 from codex_sdk.thread import Turn
 
 tools = importlib.import_module("pydantic_ai.tools")
@@ -185,6 +186,19 @@ async def test_codex_handoff_includes_items_and_usage():
 
 
 @pytest.mark.asyncio
+async def test_codex_handoff_can_exclude_items_and_usage() -> None:
+    """Cover branches where include_usage/include_items are disabled."""
+    items = [AgentMessageItem(id="m", type="agent_message", text="hi")]
+    codex = FakeCodex(items)
+    handoff = CodexHandoff(codex=codex, include_items=False, include_usage=False)
+
+    result = await handoff.run("hi")
+    assert result["final_response"] == "final"
+    assert "usage" not in result
+    assert "items" not in result
+
+
+@pytest.mark.asyncio
 async def test_codex_handoff_timeout_uses_asyncio_wait_for(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -214,3 +228,29 @@ def test_codex_handoff_tool_factory_builds_tool():
     assert isinstance(tool, Tool)
     assert tool.name == "codex_x"
     assert tool.description == "desc"
+
+
+def test_codex_handoff_tool_factory_accepts_thread_options() -> None:
+    """Cover the branch where thread_options is explicitly provided."""
+    items = [AgentMessageItem(id="m", type="agent_message", text="hi")]
+    codex = FakeCodex(items)
+    tool = codex_handoff_tool(
+        codex=codex,
+        thread_options=ThreadOptions(model="gpt-4.1"),
+    )
+    assert isinstance(tool, Tool)
+
+
+def test_pydantic_ai_helpers_cover_fallback_paths():
+    """Cover small utility fallthrough paths for coverage."""
+    from codex_sdk.integrations.pydantic_ai import _item_summary, _jsonable
+
+    assert _jsonable("hello") == "hello"
+    assert _item_summary({"x": 1})["raw"] == {"x": 1}
+
+
+def test_codex_handoff_tool_factory_creates_codex_when_missing():
+    """The convenience factory should create a Codex instance when not provided."""
+    tool = codex_handoff_tool(name="codex_auto")
+    assert isinstance(tool, Tool)
+    assert tool.name == "codex_auto"

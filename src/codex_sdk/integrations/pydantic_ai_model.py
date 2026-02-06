@@ -25,7 +25,6 @@ from ..telemetry import span
 from ..thread import TurnOptions
 
 try:
-    from pydantic_ai import RunContext
     from pydantic_ai.messages import (
         ModelMessage,
         ModelRequest,
@@ -38,7 +37,7 @@ try:
     from pydantic_ai.profiles import ModelProfile, ModelProfileSpec
     from pydantic_ai.settings import ModelSettings
     from pydantic_ai.tools import ToolDefinition
-    from pydantic_ai.usage import RequestUsage
+    from pydantic_ai.usage import Usage as PydanticUsage
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
@@ -48,12 +47,15 @@ except ImportError as exc:  # pragma: no cover
 
 @dataclass(frozen=True)
 class _ToolCallEnvelope:
+    """Parsed tool-call envelope returned by Codex `--output-schema` turns."""
+
     tool_call_id: str
     tool_name: str
     arguments_json: str
 
 
 def _jsonable(value: Any) -> Any:
+    """Convert values into JSON-serializable structures for prompt/debug output."""
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
@@ -68,6 +70,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _json_dumps(value: Any) -> str:
+    """Dump a value to a deterministic JSON string for prompt embedding."""
     try:
         return json.dumps(
             _jsonable(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
@@ -77,6 +80,7 @@ def _json_dumps(value: Any) -> str:
 
 
 def _build_envelope_schema(tool_names: Sequence[str]) -> Dict[str, Any]:
+    """Build the JSON schema used to constrain Codex output to tool calls + final text."""
     name_schema: Dict[str, Any] = {"type": "string"}
     if tool_names:
         name_schema = {"type": "string", "enum": list(tool_names)}
@@ -109,6 +113,19 @@ def _render_tool_definitions(
     function_tools: Sequence[ToolDefinition],
     output_tools: Sequence[ToolDefinition],
 ) -> str:
+    """
+    Render a human-readable description of provided function and output tool definitions for inclusion in prompts.
+
+    Produces a newline-separated block that lists each tool with name, optional description, kind, parameters JSON schema, and optional fields such as outer_typed_dict_key, strict, sequential, metadata, and timeout. Function tools are listed under "Function tools:" and output tools under "Output tools (use ONE of these to finish when text is not allowed):".
+
+    Args:
+        function_tools: Tool definitions intended to be called as functions.
+        output_tools: Tool definitions intended as final output options when direct text
+            is disallowed.
+
+    Returns:
+        The rendered, trimmed multi-line string describing the tools.
+    """
     lines: List[str] = []
     if function_tools:
         lines.append("Function tools:")
@@ -124,12 +141,14 @@ def _render_tool_definitions(
                 lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
             if tool.strict is not None:
                 lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            if getattr(tool, "sequential", False):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     if output_tools:
         if lines:
@@ -149,17 +168,20 @@ def _render_tool_definitions(
                 lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
             if tool.strict is not None:
                 lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            if getattr(tool, "sequential", False):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     return "\n".join(lines).strip()
 
 
 def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
+    """Extract tool call envelopes from a Codex JSON turn output."""
     if not isinstance(output, dict):
         return []
 
@@ -191,6 +213,7 @@ def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
 
 
 def _final_from_envelope(output: Any) -> str:
+    """Extract the final text from a Codex JSON turn output."""
     if not isinstance(output, dict):
         return ""
     final = output.get("final")
@@ -198,6 +221,7 @@ def _final_from_envelope(output: Any) -> str:
 
 
 def _render_message_history(messages: Sequence[ModelMessage]) -> str:
+    """Render a compact text representation of PydanticAI message history."""
     lines: List[str] = []
 
     for message in messages:
@@ -262,6 +286,7 @@ def _render_message_history(messages: Sequence[ModelMessage]) -> str:
 
 
 def _now_utc() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
@@ -270,38 +295,83 @@ class CodexStreamedResponse(StreamedResponse):
     """Minimal streamed response wrapper for Codex model provider."""
 
     _model_name: str
-    _provider_name: str
-    _provider_url: Optional[str]
     _parts: Sequence[Any]
-    _usage_init: InitVar[RequestUsage]
+    _thread_id: str
+    _usage_init: InitVar[PydanticUsage]
     _timestamp: datetime = field(default_factory=_now_utc, init=False)
 
-    def __post_init__(self, _usage_init: RequestUsage) -> None:
+    def __post_init__(self, _usage_init: PydanticUsage) -> None:
+        """
+        Save the provided PydanticUsage into the instance's _usage attribute.
+
+        Args:
+            _usage_init: Usage information supplied as the dataclass InitVar.
+        """
         self._usage = _usage_init
 
     async def _get_event_iterator(
         self,
     ) -> AsyncIterator[ModelResponseStreamEvent]:
+        """
+        Iterates over stored response parts and yields stream events for text deltas and tool-call parts.
+
+        The iterator converts each TextPart into a text-delta event and each ToolCallPart into a tool-call event using the parts manager; other part kinds are ignored.
+
+        Returns:
+            ModelResponseStreamEvent: An event for each text or tool-call part, yielded in the original parts order.
+        """
         for index, part in enumerate(self._parts):
-            yield self._parts_manager.handle_part(
-                vendor_part_id=index,
-                part=part,
-            )
+            if isinstance(part, TextPart):
+                event = self._parts_manager.handle_text_delta(
+                    vendor_part_id=index,
+                    content=part.content,
+                )
+            elif isinstance(part, ToolCallPart):
+                event = self._parts_manager.handle_tool_call_part(
+                    vendor_part_id=index,
+                    tool_name=part.tool_name,
+                    args=part.args,
+                    tool_call_id=part.tool_call_id,
+                )
+            else:
+                event = None
+
+            if event is not None:
+                yield event
+
+    def get(self) -> ModelResponse:
+        """
+        Construct a complete model response from events received so far.
+
+        Returns:
+            ModelResponse: Contains collected parts, the model name, timestamp, usage, and `vendor_details` with the Codex thread_id.
+        """
+        return ModelResponse(
+            parts=self._parts_manager.get_parts(),
+            model_name=self.model_name,
+            timestamp=self.timestamp,
+            usage=self.usage(),
+            vendor_details={"thread_id": self._thread_id},
+        )
 
     @property
     def model_name(self) -> str:
+        """
+        Return the model identifier used for the response.
+
+        Returns:
+            The model identifier string.
+        """
         return self._model_name
 
     @property
-    def provider_name(self) -> str:
-        return self._provider_name
-
-    @property
-    def provider_url(self) -> Optional[str]:
-        return self._provider_url
-
-    @property
     def timestamp(self) -> datetime:
+        """
+        Get the UTC timestamp when this response was created.
+
+        Returns:
+            datetime: The timestamp associated with the response.
+        """
         return self._timestamp
 
 
@@ -318,6 +388,18 @@ class CodexModel(Model):
         settings: Optional[ModelSettings] = None,
         system: str = "openai",
     ) -> None:
+        """Create a Codex-backed PydanticAI model provider.
+
+        Args:
+            codex: Optional Codex instance to delegate work to.
+            codex_options: Options used only when creating a default Codex instance.
+            thread_options: Options used when starting Codex threads for each request.
+                When not provided, safe defaults are applied (read-only sandbox, no
+                web search, and no network).
+            profile: Optional PydanticAI profile describing capabilities.
+            settings: Optional PydanticAI model settings.
+            system: PydanticAI vendor/system identifier (used for routing/metadata).
+        """
         if codex is None:
             codex = Codex(codex_options or CodexOptions())
         if thread_options is None:
@@ -349,10 +431,12 @@ class CodexModel(Model):
 
     @property
     def model_name(self) -> str:
+        """Return the model identifier for this provider."""
         return self._thread_options.model or "codex"
 
     @property
     def system(self) -> str:
+        """Return the provider system identifier (vendor name)."""
         return self._system
 
     async def _run_codex_request(
@@ -360,10 +444,28 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
-        model_settings, model_request_parameters = self.prepare_request(
-            model_settings,
-            model_request_parameters,
+    ) -> tuple[List[Any], PydanticUsage, str, ModelRequestParameters]:
+        """
+        Run a Codex thread for the given conversation and request parameters, and parse the JSON envelope into response parts.
+
+        Args:
+            messages: Conversation messages to include in the Codex prompt.
+            model_settings: Ignored by this implementation.
+            model_request_parameters: Controls function/output tool definitions, whether
+                text output is allowed, and may be customized before the request.
+
+        Returns:
+            Tuple of `(parts, usage, thread_id, model_request_parameters)`:
+            - `parts`: Response parts parsed from the envelope (ToolCallPart for tool calls
+              or TextPart for final text).
+            - `usage`: Usage information for the request.
+            - `thread_id`: The Codex thread identifier used for the request.
+            - `model_request_parameters`: The (possibly customized) request parameters
+              actually used for the request.
+        """
+        del model_settings
+        model_request_parameters = self.customize_request_parameters(
+            model_request_parameters
         )
 
         tool_defs = [
@@ -418,12 +520,17 @@ class CodexModel(Model):
                 prompt, output_schema=output_schema, turn_options=TurnOptions()
             )
 
-        usage = RequestUsage()
+        usage = PydanticUsage(requests=1)
         if parsed_turn.turn.usage is not None:
-            usage = RequestUsage(
-                input_tokens=parsed_turn.turn.usage.input_tokens,
-                output_tokens=parsed_turn.turn.usage.output_tokens,
-                cache_read_tokens=parsed_turn.turn.usage.cached_input_tokens,
+            cached = parsed_turn.turn.usage.cached_input_tokens
+            details = {"cached_input_tokens": cached} if cached else None
+            usage = PydanticUsage(
+                requests=1,
+                request_tokens=parsed_turn.turn.usage.input_tokens,
+                response_tokens=parsed_turn.turn.usage.output_tokens,
+                total_tokens=parsed_turn.turn.usage.input_tokens
+                + parsed_turn.turn.usage.output_tokens,
+                details=details,
             )
 
         tool_calls = _tool_calls_from_envelope(parsed_turn.output)
@@ -452,6 +559,17 @@ class CodexModel(Model):
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
+        """
+        Send the provided message history to Codex and return a ModelResponse containing the model output and metadata.
+
+        Args:
+            messages: The conversation as a list of ModelMessage objects to send to the model.
+            model_settings: Optional model configuration (may be ignored by the Codex backend).
+            model_request_parameters: Request-specific parameters that influence Codex execution.
+
+        Returns:
+            ModelResponse containing the generated parts, usage information, the model name, and vendor_details with the Codex `thread_id`.
+        """
         parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
             model_settings,
@@ -461,8 +579,7 @@ class CodexModel(Model):
             parts=parts,
             usage=usage,
             model_name=self.model_name,
-            provider_name="codex",
-            provider_details={"thread_id": thread_id},
+            vendor_details={"thread_id": thread_id},
         )
 
     @asynccontextmanager
@@ -471,21 +588,27 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-        run_context: Optional[RunContext[Any]] = None,
     ) -> AsyncIterator[StreamedResponse]:
-        del run_context
-        parts, usage, thread_id, prepared_params = await self._run_codex_request(
+        """
+        Produce an asynchronous stream that yields a Codex-backed streamed model response for the given message sequence.
+
+        Args:
+            messages: Conversation messages to send to the model.
+            model_settings: Model-specific settings (may be None).
+            model_request_parameters: Additional request parameters controlling the model call.
+
+        Returns:
+            An async iterator that yields a single StreamedResponse (CodexStreamedResponse) containing the model name, response parts, usage information, and the Codex thread identifier.
+        """
+        parts, usage, thread_id, _ = await self._run_codex_request(
             messages,
             model_settings,
             model_request_parameters,
         )
         streamed = CodexStreamedResponse(
-            model_request_parameters=prepared_params,
             _model_name=self.model_name,
-            _provider_name="codex",
-            _provider_url=None,
             _parts=parts,
+            _thread_id=thread_id,
             _usage_init=usage,
         )
-        streamed.provider_details = {"thread_id": thread_id}
         yield streamed
