@@ -10,6 +10,7 @@
 ## Build, Test, and Development Commands
 - `uv sync` installs dev dependencies from `pyproject.toml`.
 - `python scripts/setup_binary.py` downloads and installs the Codex CLI binaries (requires Node.js/npm).
+  It resolves the latest `@openai/codex` version and assembles per-platform npm artifacts into `src/codex_sdk/vendor/`.
 - `python examples/basic_usage.py` runs a quick smoke test of the SDK.
 - `uv run pytest` runs the test suite.
 - `uv run pytest --cov=codex_sdk` runs tests with coverage enforcement.
@@ -20,6 +21,8 @@
 - Use 4-space indentation and Python 3.8+ syntax.
 - Formatting is enforced by Black (line length 88) and isort (profile: black).
 - Linting via flake8; typing is strict via mypy (type hints expected on functions).
+- Keep app-server wrappers comprehensive with upstream protocol methods; avoid shipping partial wrapper surfaces.
+- Prefer strongly-typed request helpers (TypedDict/pydantic-backed shapes where practical) for public SDK entry points.
 - Tests follow pytest naming: files `test_*.py` or `*_test.py`, classes `Test*`, functions `test_*`.
 
 ## Testing Guidelines
@@ -32,6 +35,7 @@
 - Commit messages are short, imperative, and sentence case (e.g., "Fix ruff lint issues").
 - PRs should describe the change, note test commands run, and link related issues.
 - If behavior or public docs change, update `README.md` and `CHANGELOG_SDK.md`.
+- For PR-review fixes, do not leave validated changes local-only: after tests pass, commit and push to the active PR branch in the same iteration.
 
 ## Security & Configuration Tips
 - Authenticate the local Codex CLI with `codex login` after installing binaries.

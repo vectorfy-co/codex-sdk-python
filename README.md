@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.98.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.101.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.101.0 badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -374,8 +374,9 @@ Supported target triples:
 - macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
 - Windows: `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`
 
-If you are working from source and the vendor directory is missing, run `python scripts/setup_binary.py`
-or follow `SETUP.md` to download the official npm package and copy the `vendor/` directory.
+If you are working from source and the vendor directory is missing, run
+`python scripts/setup_binary.py` to fetch and assemble the platform `@openai/codex`
+artifacts into `src/codex_sdk/vendor/`.
 
 <a id="auth"></a>
 ## ![Auth](https://img.shields.io/badge/Auth%20%26%20Credentials-Access-2563eb?style=for-the-badge&logo=gnubash&logoColor=white)

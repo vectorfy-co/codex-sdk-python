@@ -2,31 +2,30 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## [0.98.0] - 2026-02-05
+## [0.101.0] - 2026-02-15
 
 ### Added
-- Exec event parsing for `collab_tool_call` items (collaboration tool calls).
-- Exec event parsing for `web_search` `action` payloads.
-- Thread option `model_personality="none"` (mirrors app-server personality support).
-- App-server option `experimental_api_enabled` to opt into experimental methods/fields via `initialize.capabilities.experimentalApi=true`.
-- App-server helpers: `thread_name_set`, `thread_unarchive`, `thread_compact_start`,
-  `skills_remote_read`, `skills_remote_write`, and `skills_config_write`.
-- `thread_list` now accepts `sort_key` and `source_kinds`.
+- New app-server wrappers for recently exposed endpoints, including
+  `thread_unarchive`, `thread_name_set`, `thread_compact_start`,
+  `thread_background_terminals_clean`, `turn_steer`, `experimental_feature_list`,
+  `account_chatgpt_auth_tokens_refresh`, `skills_config_write`,
+  `skills_remote_read`/`skills_remote_write`, `item_tool_call`,
+  `item_tool_request_user_input`, `item_command_execution_request_approval`,
+  `item_file_change_request_approval`, and `mock_experimental_method`.
+- New `tool_envelope` module for shared tool-call envelope parsing, normalization,
+  and schema validation utilities used by model-driven tool loops.
+- Pydantic-AI model provider hardening for request/usage/streaming compatibility
+  across API variants, with expanded integration coverage for robust tool-call flows.
 
 ### Updated
-- Fixed `codex exec` argument ordering when resuming a thread with `--image` attachments
-  (resume args now precede image args to avoid greedy flag parsing).
-- `max_threads` validation now only enforces `>= 1` (Codex defaults to 6; this is not a hard cap).
-- PydanticAI integration updated for `pydantic-ai` 0.6.x.
-- Fixed `logfire` optional dependency to avoid shadowing Pydantic's Logfire packages in CI,
-  which prevented `pydantic_ai` from importing and caused coverage failures.
-- `scripts/setup_binary.py` now pins the npm download to `@openai/codex-sdk@<pyproject version>`
-  so vendor binaries match the SDK version.
-- Bundled Codex CLI vendor binaries updated to 0.98.0 via `scripts/setup_binary.py`.
-- SDK version set to 0.98.0 to match Codex CLI release.
+- Bundled Codex CLI vendor binaries updated to 0.101.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.101.0 to match the latest published Codex CLI stable release.
+- `scripts/setup_binary.py` now supports the current npm packaging model that ships
+  platform-specific `@openai/codex@<version>-<target>` artifacts.
 
 ### Notes
-- Codex 0.98.0 introduces GPT-5.3-Codex (model availability is controlled by your Codex provider).
+- Upstream `0.103.0` was not available on public GitHub/npm release channels during this
+  update run; the sync is pinned to the latest published stable (`0.101.0`).
 
 ## [0.91.0] - 2026-01-27
 
