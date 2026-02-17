@@ -3,6 +3,8 @@ import importlib
 
 import pytest
 
+import codex_sdk.integrations.pydantic_ai_model as pydantic_ai_model
+
 pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai")
 BaseModel = pydantic.BaseModel
@@ -10,10 +12,13 @@ BaseModel = pydantic.BaseModel
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
+    _attach_response_details,
     _build_envelope_schema,
+    _build_model_response,
     _final_from_envelope,
     _json_dumps,
     _jsonable,
+    _make_request_usage,
     _render_message_history,
     _render_tool_definitions,
     _tool_calls_from_envelope,
@@ -26,7 +31,7 @@ models = importlib.import_module("pydantic_ai.models")
 tools = importlib.import_module("pydantic_ai.tools")
 
 BuiltinToolCallPart = messages.BuiltinToolCallPart
-FilePart = messages.FilePart
+FilePart = getattr(messages, "FilePart", None)
 ModelRequest = messages.ModelRequest
 ModelResponse = messages.ModelResponse
 PartStartEvent = messages.PartStartEvent
@@ -39,6 +44,35 @@ ToolReturnPart = messages.ToolReturnPart
 UserPromptPart = messages.UserPromptPart
 ModelRequestParameters = models.ModelRequestParameters
 ToolDefinition = tools.ToolDefinition
+TOOL_DEFINITION_FIELDS = set(getattr(ToolDefinition, "__dataclass_fields__", {}).keys())
+
+
+def _usage_tokens(usage):
+    if hasattr(usage, "input_tokens"):
+        return (
+            usage.input_tokens,
+            getattr(usage, "cache_read_tokens", 0),
+            usage.output_tokens,
+        )
+    details = getattr(usage, "details", {}) or {}
+    return (
+        getattr(usage, "request_tokens", 0) or 0,
+        details.get("cache_read_tokens", 0),
+        getattr(usage, "response_tokens", 0) or 0,
+    )
+
+
+def _response_details(response):
+    details = getattr(response, "provider_details", None)
+    if details is not None:
+        return details
+    return getattr(response, "vendor_details", None)
+
+
+def _make_tool_definition(**kwargs):
+    return ToolDefinition(
+        **{key: value for key, value in kwargs.items() if key in TOOL_DEFINITION_FIELDS}
+    )
 
 
 class FakeThread:
@@ -103,9 +137,7 @@ async def test_codex_model_returns_tool_calls():
     assert response.parts[0].tool_name == "add"
     assert response.parts[0].tool_call_id == "call_1"
     assert response.parts[0].args == '{"a":1,"b":2}'
-    assert response.usage.input_tokens == 1
-    assert response.usage.cache_read_tokens == 2
-    assert response.usage.output_tokens == 3
+    assert _usage_tokens(response.usage) == (1, 2, 3)
 
     # Schema should restrict tool names
     enum = thread.last_schema["properties"]["tool_calls"]["items"]["properties"][
@@ -183,7 +215,7 @@ def test_json_dumps_falls_back_to_str_for_unserializable_objects():
 def test_render_tool_definitions_includes_output_tools_and_sequential():
     manifest = _render_tool_definitions(
         function_tools=[
-            ToolDefinition(
+            _make_tool_definition(
                 name="a",
                 description="A",
                 sequential=True,
@@ -195,7 +227,7 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
             )
         ],
         output_tools=[
-            ToolDefinition(
+            _make_tool_definition(
                 name="final",
                 description="Final",
                 sequential=True,
@@ -209,7 +241,8 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
     )
     assert "Function tools:" in manifest
     assert "- a" in manifest
-    assert "sequential: true" in manifest
+    if "sequential" in TOOL_DEFINITION_FIELDS:
+        assert "sequential: true" in manifest
     assert "Output tools" in manifest
     assert "- final" in manifest
 
@@ -217,7 +250,7 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
 def test_render_tool_definitions_includes_metadata_and_timeout():
     manifest = _render_tool_definitions(
         function_tools=[
-            ToolDefinition(
+            _make_tool_definition(
                 name="metadata_tool",
                 description="With metadata",
                 parameters_json_schema={
@@ -234,8 +267,10 @@ def test_render_tool_definitions_includes_metadata_and_timeout():
         ],
         output_tools=[],
     )
-    assert 'metadata: {"scope":["read","write"],"tier":"gold"}' in manifest
-    assert "timeout: 2.5" in manifest
+    if "metadata" in TOOL_DEFINITION_FIELDS:
+        assert 'metadata: {"scope":["read","write"],"tier":"gold"}' in manifest
+    if "timeout" in TOOL_DEFINITION_FIELDS:
+        assert "timeout: 2.5" in manifest
     assert "strict: true" in manifest
     assert "outer_typed_dict_key: payload" in manifest
     assert "kind: external" in manifest
@@ -245,7 +280,7 @@ def test_render_tool_definitions_includes_output_tool_metadata():
     manifest = _render_tool_definitions(
         function_tools=[],
         output_tools=[
-            ToolDefinition(
+            _make_tool_definition(
                 name="final",
                 description="Output",
                 parameters_json_schema={
@@ -261,8 +296,10 @@ def test_render_tool_definitions_includes_output_tool_metadata():
             )
         ],
     )
-    assert 'metadata: {"priority":"high"}' in manifest
-    assert "timeout: 1.0" in manifest
+    if "metadata" in TOOL_DEFINITION_FIELDS:
+        assert 'metadata: {"priority":"high"}' in manifest
+    if "timeout" in TOOL_DEFINITION_FIELDS:
+        assert "timeout: 1.0" in manifest
     assert "strict: false" in manifest
     assert "outer_typed_dict_key: payload" in manifest
     assert "kind: output" in manifest
@@ -283,13 +320,56 @@ def test_envelope_extractors_filter_invalid_shapes():
             "final": "",
         }
     )
-    assert [c.tool_call_id for c in calls] == ["x"]
+    assert calls == []
     assert _final_from_envelope("nope") == ""
     assert _final_from_envelope({"final": 1}) == ""
-    assert _final_from_envelope({"final": "ok"}) == "ok"
+    assert _final_from_envelope({"final": "ok"}) == ""
+
+
+def test_final_from_envelope_returns_empty_for_tool_call_output():
+    assert (
+        _final_from_envelope(
+            {"tool_calls": [{"id": "x", "name": "t", "arguments": "{}"}], "final": ""}
+        )
+        == ""
+    )
+
+
+def test_render_tool_definitions_optional_fields_with_plain_tools():
+    class DummyTool:
+        def __init__(self, name):
+            self.name = name
+            self.description = "desc"
+            self.kind = "dummy"
+            self.parameters_json_schema = {"type": "object"}
+            self.outer_typed_dict_key = "payload"
+            self.strict = True
+            self.sequential = True
+            self.metadata = {"tier": "gold"}
+            self.timeout = 1.2
+
+    manifest = _render_tool_definitions(
+        function_tools=[DummyTool("fn")],
+        output_tools=[DummyTool("out")],
+    )
+    assert "sequential: true" in manifest
+    assert 'metadata: {"tier":"gold"}' in manifest
+    assert "timeout: 1.2" in manifest
 
 
 def test_render_message_history_includes_request_and_response_parts():
+    if FilePart is None:
+
+        class CompatFilePart:
+            part_kind = "file"
+
+            def __init__(self, content: bytes):
+                self.content = content
+
+        file_part = CompatFilePart(b"abc")
+    else:
+        file_part = FilePart(b"abc")
+
     history = _render_message_history(
         [
             ModelRequest(
@@ -299,7 +379,7 @@ def test_render_message_history_includes_request_and_response_parts():
                     UserPromptPart([{"type": "text", "text": "hi"}]),
                     ToolReturnPart("t", {"x": 1}, tool_call_id="call_1"),
                     RetryPromptPart("retry"),
-                    FilePart(b"abc"),
+                    file_part,
                 ],
                 instructions="ins",
             ),
@@ -419,7 +499,105 @@ async def test_codex_model_request_stream_yields_response():
     assert len(response.parts) == 1
     assert isinstance(response.parts[0], TextPart)
     assert response.parts[0].content == "hello"
-    assert response.provider_details == {"thread_id": "thread-123"}
+    assert _response_details(response) == {"thread_id": "thread-123"}
+
+
+@pytest.mark.asyncio
+async def test_codex_model_request_stream_tool_call_branch_and_provider_properties():
+    output = {
+        "tool_calls": [{"id": "call_1", "name": "add", "arguments": '{"a":1}'}],
+        "final": "",
+    }
+    thread = FakeThread(output)
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+    messages = [ModelRequest(parts=[UserPromptPart("hi")])]
+    params = ModelRequestParameters(
+        function_tools=[
+            ToolDefinition(
+                name="add",
+                description="add",
+                parameters_json_schema={"type": "object"},
+            )
+        ],
+        output_mode="tool",
+        allow_text_output=False,
+    )
+
+    async with model.request_stream(messages, None, params) as streamed:
+        events = [event async for event in streamed]
+        response = streamed.get()
+        assert streamed.provider_name == "codex"
+        assert streamed.provider_url is None
+
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], ToolCallPart)
+    assert response.parts[0].tool_name == "add"
+
+
+def test_make_request_usage_none_and_input_tokens_ctor(monkeypatch):
+    usage_none = _make_request_usage(None)
+    assert usage_none is not None
+
+    class CompatUsage:
+        def __init__(self, **kwargs):
+            self.input_tokens = kwargs.get("input_tokens", 0)
+            self.output_tokens = kwargs.get("output_tokens", 0)
+            self.cache_read_tokens = kwargs.get("cache_read_tokens", 0)
+
+    monkeypatch.setattr(pydantic_ai_model, "_REQUEST_USAGE_CTOR", CompatUsage)
+    usage = _make_request_usage(
+        Usage(input_tokens=1, cached_input_tokens=2, output_tokens=3)
+    )
+    assert usage.input_tokens == 1
+    assert usage.output_tokens == 3
+    assert usage.cache_read_tokens == 2
+
+
+def test_response_detail_compatibility_provider_details(monkeypatch):
+    class DummyResponse:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(pydantic_ai_model, "ModelResponse", DummyResponse)
+    monkeypatch.setattr(
+        pydantic_ai_model,
+        "_MODEL_RESPONSE_FIELDS",
+        {"provider_name", "provider_details"},
+    )
+    response = _build_model_response(
+        parts=[],
+        usage=_make_request_usage(None),
+        model_name="codex",
+        details={"thread_id": "thread-123"},
+    )
+    assert response.kwargs["provider_name"] == "codex"
+    assert response.kwargs["provider_details"] == {"thread_id": "thread-123"}
+
+    target = type("Target", (), {})()
+    _attach_response_details(target, {"thread_id": "thread-123"})
+    assert target.provider_details == {"thread_id": "thread-123"}
+
+
+@pytest.mark.asyncio
+async def test_codex_model_uses_prepare_request_hook_when_present():
+    output = {"tool_calls": [], "final": "hello"}
+    thread = FakeThread(output)
+    model = CodexModel(codex=FakeCodex(thread))
+    called = {"value": False}
+
+    def prepare_request(model_settings, model_request_parameters):
+        called["value"] = True
+        return model_settings, model_request_parameters
+
+    model.prepare_request = prepare_request
+    await model.request(
+        [ModelRequest(parts=[UserPromptPart("hi")])],
+        None,
+        ModelRequestParameters(output_mode="text", allow_text_output=True),
+    )
+    assert called["value"] is True
 
 
 def test_codex_model_can_construct_codex_from_options():

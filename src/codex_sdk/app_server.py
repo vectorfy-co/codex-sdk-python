@@ -503,6 +503,38 @@ class AppServerClient:
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
         return await self._request_dict("thread/archive", {"threadId": thread_id})
 
+    async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
+        return await self._request_dict("thread/unarchive", {"threadId": thread_id})
+
+    async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
+        return await self._request_dict(
+            "thread/name/set", {"threadId": thread_id, "name": name}
+        )
+
+    async def thread_compact_start(
+        self,
+        thread_id: str,
+        *,
+        instructions: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"thread_id": thread_id}
+        if instructions is not None:
+            payload["instructions"] = instructions
+        return await self._request_dict("thread/compact/start", _coerce_keys(payload))
+
+    async def thread_background_terminals_clean(
+        self,
+        thread_id: str,
+        *,
+        terminal_ids: Optional[Sequence[str]] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"thread_id": thread_id}
+        if terminal_ids is not None:
+            payload["terminal_ids"] = list(terminal_ids)
+        return await self._request_dict(
+            "thread/backgroundTerminals/clean", _coerce_keys(payload)
+        )
+
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
     ) -> Dict[str, Any]:
@@ -621,6 +653,18 @@ class AppServerClient:
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
         )
 
+    async def turn_steer(
+        self,
+        thread_id: str,
+        turn_id: str,
+        *,
+        prompt: str,
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "turn/steer",
+            {"threadId": thread_id, "turnId": turn_id, "prompt": prompt},
+        )
+
     async def model_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -643,6 +687,19 @@ class AppServerClient:
 
     async def collaboration_mode_list(self) -> Dict[str, Any]:
         return await self._request_dict("collaborationMode/list", {})
+
+    async def experimental_feature_list(
+        self,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        return await self._request_dict("experimentalFeature/list", params or None)
 
     async def command_exec(
         self,
@@ -697,6 +754,78 @@ class AppServerClient:
     async def account_read(self, *, refresh_token: bool = False) -> Dict[str, Any]:
         return await self._request_dict(
             "account/read", {"refreshToken": refresh_token} if refresh_token else None
+        )
+
+    async def account_chatgpt_auth_tokens_refresh(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "account/chatgptAuthTokens/refresh",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def skills_config_write(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "skills/config/write",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def skills_remote_read(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "skills/remote/read",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def skills_remote_write(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "skills/remote/write",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def item_tool_call(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "item/tool/call",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def item_tool_request_user_input(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "item/tool/requestUserInput",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def item_command_execution_request_approval(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "item/commandExecution/requestApproval",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def item_file_change_request_approval(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "item/fileChange/requestApproval",
+            _coerce_keys(params) if params is not None else None,
+        )
+
+    async def mock_experimental_method(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await self._request_dict(
+            "mock/experimentalMethod",
+            _coerce_keys(params) if params is not None else None,
         )
 
     async def feedback_upload(

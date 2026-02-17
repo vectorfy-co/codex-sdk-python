@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""
-Setup script for the Codex Python SDK.
+"""Download and install vendored Codex CLI binaries for the Python SDK."""
 
-This script downloads the real codex binary from the npm package and sets it up
-for use with the Python SDK.
-"""
-
+import os
 import platform
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import List, Tuple
+
+TARGET_TO_SUFFIX = {
+    "aarch64-apple-darwin": "darwin-arm64",
+    "x86_64-apple-darwin": "darwin-x64",
+    "aarch64-unknown-linux-musl": "linux-arm64",
+    "x86_64-unknown-linux-musl": "linux-x64",
+    "aarch64-pc-windows-msvc": "win32-arm64",
+    "x86_64-pc-windows-msvc": "win32-x64",
+}
 
 
 def run_command(cmd, cwd=None, check=True):
@@ -51,76 +57,117 @@ def check_dependencies():
     return True
 
 
-def download_codex_package():
-    """Download the codex-sdk npm package."""
-    print("Downloading codex-sdk package...")
+def resolve_codex_version() -> str:
+    """Resolve the Codex npm version to install."""
+    requested = os.environ.get("CODEX_NPM_VERSION", "").strip()
+    if requested:
+        print(f"Using requested CODEX_NPM_VERSION: {requested}")
+        return requested
 
-    # Create a temporary directory for the download
+    print("Resolving latest @openai/codex version...")
+    result = run_command(["npm", "view", "@openai/codex", "version"])
+    version = result.stdout.strip()
+    if not version:
+        raise RuntimeError("Could not resolve @openai/codex version from npm")
+    print(f"Resolved @openai/codex version: {version}")
+    return version
+
+
+def extract_tarball(tarball_path: Path, destination: Path) -> Path:
+    """Extract a tarball and return the extracted package directory."""
+    destination.mkdir(parents=True, exist_ok=True)
+    run_command(["tar", "-xzf", str(tarball_path), "-C", str(destination)])
+    package_dir = destination / "package"
+    if not package_dir.exists():
+        raise RuntimeError(f"No package directory found in {tarball_path.name}")
+    return package_dir
+
+
+def download_codex_packages(version: str) -> Tuple[Path, List[Path]]:
+    """Download package(s) that contain vendor binaries for all target platforms."""
+    print("Downloading Codex npm packages...")
+
     temp_dir = Path(tempfile.mkdtemp(prefix="codex-setup-"))
     print(f"Using temporary directory: {temp_dir}")
 
-    try:
-        # Download the package
-        run_command(["npm", "pack", "@openai/codex-sdk"], cwd=temp_dir)
+    package_dirs: List[Path] = []
 
-        # Find the downloaded tarball
-        tarball_files = list(temp_dir.glob("*.tgz"))
-        if not tarball_files:
-            raise RuntimeError("No tarball found after npm pack")
+    # Older releases bundled all targets in @openai/codex-sdk. Keep this path for
+    # backwards compatibility.
+    sdk_spec = f"@openai/codex-sdk@{version}"
+    sdk_pack = run_command(["npm", "pack", sdk_spec], cwd=temp_dir, check=False)
+    if sdk_pack.returncode == 0:
+        sdk_tgz = next(temp_dir.glob("openai-codex-sdk-*.tgz"), None)
+        if sdk_tgz is not None:
+            sdk_package_dir = extract_tarball(sdk_tgz, temp_dir / "codex-sdk")
+            if (sdk_package_dir / "vendor").exists():
+                print(f"Found vendored binaries in {sdk_spec}")
+                package_dirs.append(sdk_package_dir)
 
-        tarball_path = tarball_files[0]
-        print(f"Downloaded: {tarball_path.name}")
+    if package_dirs:
+        return temp_dir, package_dirs
 
-        # Extract the tarball
-        print("Extracting package...")
-        run_command(["tar", "-xzf", str(tarball_path)], cwd=temp_dir)
+    print(
+        "Falling back to platform-specific @openai/codex artifacts "
+        "(new packaging format)."
+    )
+    for target, suffix in TARGET_TO_SUFFIX.items():
+        spec = f"@openai/codex@{version}-{suffix}"
+        print(f"Downloading {spec} for {target}")
+        run_command(["npm", "pack", spec], cwd=temp_dir)
+        tarball = temp_dir / f"openai-codex-{version}-{suffix}.tgz"
+        if not tarball.exists():
+            matches = list(temp_dir.glob(f"openai-codex-*{suffix}.tgz"))
+            if len(matches) != 1:
+                raise RuntimeError(f"Could not find tarball for {spec}")
+            tarball = matches[0]
+        package_dir = extract_tarball(tarball, temp_dir / f"platform-{suffix}")
+        vendor_dir = package_dir / "vendor"
+        if not vendor_dir.exists():
+            raise RuntimeError(f"Vendor directory not found in {spec}")
+        package_dirs.append(package_dir)
 
-        # Find the extracted package directory
-        package_dirs = [
-            d for d in temp_dir.iterdir() if d.is_dir() and d.name.startswith("package")
-        ]
-        if not package_dirs:
-            raise RuntimeError("No package directory found after extraction")
-
-        package_dir = package_dirs[0]
-        print(f"Extracted to: {package_dir}")
-
-        return package_dir
-
-    except Exception as e:
-        print(f"ERROR: Error downloading package: {e}")
-        # Clean up on error
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise
+    return temp_dir, package_dirs
 
 
-def setup_vendor_directory(package_dir, sdk_dir):
-    """Copy the vendor directory from the package to the SDK."""
+def setup_vendor_directory(package_dirs: List[Path], sdk_dir: Path):
+    """Copy vendor directories from downloaded packages to the SDK."""
     print("Setting up vendor directory...")
-
-    vendor_src = package_dir / "vendor"
     vendor_dest = sdk_dir / "src" / "codex_sdk" / "vendor"
-
-    if not vendor_src.exists():
-        raise RuntimeError("Vendor directory not found in downloaded package")
 
     # Remove existing vendor directory if it exists
     if vendor_dest.exists():
         print("Removing existing vendor directory...")
         shutil.rmtree(vendor_dest)
 
-    # Copy the vendor directory
-    print(f"Copying vendor directory from {vendor_src} to {vendor_dest}")
-    shutil.copytree(vendor_src, vendor_dest)
+    vendor_dest.mkdir(parents=True, exist_ok=True)
+
+    copied_targets = set()
+    for package_dir in package_dirs:
+        vendor_src = package_dir / "vendor"
+        if not vendor_src.exists():
+            raise RuntimeError(f"Vendor directory not found in {package_dir}")
+        for target_dir in sorted(p for p in vendor_src.iterdir() if p.is_dir()):
+            destination = vendor_dest / target_dir.name
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(target_dir, destination)
+            copied_targets.add(target_dir.name)
 
     # Verify the copy
     if not vendor_dest.exists():
         raise RuntimeError("Failed to copy vendor directory")
 
+    missing_targets = sorted(set(TARGET_TO_SUFFIX.keys()) - copied_targets)
+    if missing_targets:
+        raise RuntimeError(
+            "Missing vendored targets after copy: " + ", ".join(missing_targets)
+        )
+
     print("SUCCESS: Vendor directory set up successfully")
 
     # Show what platforms are available
-    platforms = [d.name for d in vendor_dest.iterdir() if d.is_dir()]
+    platforms = sorted(d.name for d in vendor_dest.iterdir() if d.is_dir())
     print(f"Available platforms: {', '.join(platforms)}")
 
     return vendor_dest
@@ -234,27 +281,24 @@ def main():
     sdk_dir = Path(__file__).resolve().parent.parent
     print(f"SDK directory: {sdk_dir}")
 
+    temp_dir = None
     try:
         # Check dependencies
         if not check_dependencies():
             return 1
 
-        # Download the package
-        package_dir = download_codex_package()
+        # Resolve target version and download vendor packages
+        version = resolve_codex_version()
+        temp_dir, package_dirs = download_codex_packages(version)
 
         # Setup vendor directory
-        vendor_dir = setup_vendor_directory(package_dir, sdk_dir)
+        vendor_dir = setup_vendor_directory(package_dirs, sdk_dir)
 
         # Verify binary for current platform
         binary_path = verify_binary_for_current_platform(vendor_dir)
 
         # Test the binary
         test_binary(binary_path)
-
-        # Clean up temporary directory
-        temp_dir = package_dir.parent
-        print(f"Cleaning up temporary directory: {temp_dir}")
-        shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Print next steps
         print_next_steps()
@@ -268,6 +312,10 @@ def main():
         print("2. Check your internet connection")
         print("3. Try running: conda install nodejs")
         return 1
+    finally:
+        if temp_dir is not None:
+            print(f"Cleaning up temporary directory: {temp_dir}")
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -369,8 +369,9 @@ Supported target triples:
 - macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
 - Windows: `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`
 
-If you are working from source and the vendor directory is missing, run `python scripts/setup_binary.py`
-or follow `SETUP.md` to download the official npm package and copy the `vendor/` directory.
+If you are working from source and the vendor directory is missing, run
+`python scripts/setup_binary.py` to fetch and assemble the platform `@openai/codex`
+artifacts into `src/codex_sdk/vendor/`.
 
 <a id="auth"></a>
 ## ![Auth](https://img.shields.io/badge/Auth%20%26%20Credentials-Access-2563eb?style=for-the-badge&logo=gnubash&logoColor=white)

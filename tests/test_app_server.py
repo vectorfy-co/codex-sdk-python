@@ -255,6 +255,14 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "turn/interrupt", {})
     assert payload["params"] == {"threadId": "t1", "turnId": "turn_1"}
 
+    task = asyncio.create_task(client.turn_steer("t1", "turn_1", prompt="be concise"))
+    _, payload = await expect_request(task, "turn/steer", {})
+    assert payload["params"] == {
+        "threadId": "t1",
+        "turnId": "turn_1",
+        "prompt": "be concise",
+    }
+
     task = asyncio.create_task(
         client.thread_list(
             cursor="c2", limit=2, model_providers=["openai"], archived=True
@@ -273,6 +281,28 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.thread_archive("t1"))
     _, payload = await expect_request(task, "thread/archive", {})
     assert payload["params"] == {"threadId": "t1"}
+
+    task = asyncio.create_task(client.thread_unarchive("t1"))
+    _, payload = await expect_request(task, "thread/unarchive", {})
+    assert payload["params"] == {"threadId": "t1"}
+
+    task = asyncio.create_task(client.thread_name_set("t1", name="Renamed"))
+    _, payload = await expect_request(task, "thread/name/set", {"thread": {"id": "t1"}})
+    assert payload["params"] == {"threadId": "t1", "name": "Renamed"}
+
+    task = asyncio.create_task(
+        client.thread_compact_start("t1", instructions="summarize")
+    )
+    _, payload = await expect_request(task, "thread/compact/start", {"ok": True})
+    assert payload["params"] == {"threadId": "t1", "instructions": "summarize"}
+
+    task = asyncio.create_task(
+        client.thread_background_terminals_clean("t1", terminal_ids=["s1"])
+    )
+    _, payload = await expect_request(
+        task, "thread/backgroundTerminals/clean", {"ok": True}
+    )
+    assert payload["params"] == {"threadId": "t1", "terminalIds": ["s1"]}
 
     task = asyncio.create_task(client.thread_rollback("t1", num_turns=2))
     _, payload = await expect_request(task, "thread/rollback", {"thread": {"id": "t1"}})
@@ -332,6 +362,10 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
     assert payload["params"] == {}
 
+    task = asyncio.create_task(client.experimental_feature_list(cursor="x", limit=3))
+    _, payload = await expect_request(task, "experimentalFeature/list", {"data": []})
+    assert payload["params"] == {"cursor": "x", "limit": 3}
+
     task = asyncio.create_task(
         client.command_exec(command=["echo", "hi"], timeout_ms=10, cwd=tmp_path)
     )
@@ -379,6 +413,62 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.account_read(refresh_token=True))
     _, payload = await expect_request(task, "account/read", {"account": {}})
     assert payload["params"]["refreshToken"] is True
+
+    task = asyncio.create_task(
+        client.account_chatgpt_auth_tokens_refresh(params={"refresh_token": "r1"})
+    )
+    _, payload = await expect_request(
+        task, "account/chatgptAuthTokens/refresh", {"tokens": {}}
+    )
+    assert payload["params"] == {"refreshToken": "r1"}
+
+    task = asyncio.create_task(client.skills_config_write(params={"mode": "manual"}))
+    _, payload = await expect_request(task, "skills/config/write", {"ok": True})
+    assert payload["params"] == {"mode": "manual"}
+
+    task = asyncio.create_task(
+        client.skills_remote_read(params={"cwds": [str(tmp_path)]})
+    )
+    _, payload = await expect_request(task, "skills/remote/read", {"data": []})
+    assert payload["params"] == {"cwds": [str(tmp_path)]}
+
+    task = asyncio.create_task(
+        client.skills_remote_write(params={"skills": [{"name": "s"}]})
+    )
+    _, payload = await expect_request(task, "skills/remote/write", {"ok": True})
+    assert payload["params"] == {"skills": [{"name": "s"}]}
+
+    task = asyncio.create_task(client.item_tool_call(params={"name": "tool_a"}))
+    _, payload = await expect_request(task, "item/tool/call", {"ok": True})
+    assert payload["params"] == {"name": "tool_a"}
+
+    task = asyncio.create_task(
+        client.item_tool_request_user_input(params={"question": "Proceed?"})
+    )
+    _, payload = await expect_request(
+        task, "item/tool/requestUserInput", {"response": "yes"}
+    )
+    assert payload["params"] == {"question": "Proceed?"}
+
+    task = asyncio.create_task(
+        client.item_command_execution_request_approval(params={"decision": "accept"})
+    )
+    _, payload = await expect_request(
+        task, "item/commandExecution/requestApproval", {"ok": True}
+    )
+    assert payload["params"] == {"decision": "accept"}
+
+    task = asyncio.create_task(
+        client.item_file_change_request_approval(params={"decision": "accept"})
+    )
+    _, payload = await expect_request(
+        task, "item/fileChange/requestApproval", {"ok": True}
+    )
+    assert payload["params"] == {"decision": "accept"}
+
+    task = asyncio.create_task(client.mock_experimental_method(params={"ok": True}))
+    _, payload = await expect_request(task, "mock/experimentalMethod", {"ok": True})
+    assert payload["params"] == {"ok": True}
 
     task = asyncio.create_task(
         client.feedback_upload(
