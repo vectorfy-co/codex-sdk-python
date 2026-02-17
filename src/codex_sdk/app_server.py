@@ -815,7 +815,7 @@ class AppServerClient:
         *,
         path: Optional[str] = None,
         enabled: Optional[bool] = None,
-        params: Optional[Mapping[str, Any]] = None,
+        params: Optional["SkillsConfigWriteRequest"] = None,
     ) -> Dict[str, Any]:
         """
         Set skill configuration state.
@@ -823,11 +823,12 @@ class AppServerClient:
         Args:
             path: Optional configuration path identifying the skill.
             enabled: Optional enabled state for the skill.
-            params: Optional raw request payload.
+            params: Optional typed request payload for evolving protocol fields.
 
         Returns:
             The app-server response as a dictionary.
         """
+        # TODO(app-server-schema): tighten request shape after protocol stabilizes.
         payload: Dict[str, Any] = {}
         if params is not None:
             payload.update(_coerce_keys(dict(params)))
@@ -1048,16 +1049,17 @@ class AppServerClient:
             "account/chatgptAuthTokens/refresh", _coerce_keys(dict(params))
         )
 
-    async def item_tool_call(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
+    async def item_tool_call(self, *, params: "ItemToolCallRequest") -> Dict[str, Any]:
         """
         Send an item tool-call payload.
 
         Args:
-            params: Request payload for `item/tool/call`.
+            params: Typed request payload for `item/tool/call`.
 
         Returns:
             App-server response payload.
         """
+        # TODO(app-server-schema): tighten request shape after protocol stabilizes.
         return await self._request_dict("item/tool/call", _coerce_keys(dict(params)))
 
     async def item_tool_request_user_input(
@@ -1120,6 +1122,11 @@ class AppServerClient:
         Returns:
             App-server response payload.
         """
+        if not self._options.experimental_api_enabled:
+            raise CodexError(
+                "`mock/experimentalMethod` requires "
+                "AppServerOptions(experimental_api_enabled=True)."
+            )
         payload = _coerce_keys(dict(params)) if params is not None else {}
         return await self._request_dict("mock/experimentalMethod", payload)
 
@@ -1292,6 +1299,26 @@ class AppServerSkillInput(TypedDict):
     type: str
     name: str
     path: str
+
+
+class SkillsConfigWriteRequest(TypedDict, total=False):
+    """Typed payload for `skills/config/write` requests."""
+
+    path: str
+    enabled: bool
+    mode: str
+
+
+class ItemToolCallRequest(TypedDict, total=False):
+    """Typed payload for `item/tool/call` requests."""
+
+    name: str
+    tool_name: str
+    toolName: str
+    tool_call_id: str
+    toolCallId: str
+    arguments: Mapping[str, Any]
+    args: Mapping[str, Any]
 
 
 AppServerUserInput = Union[

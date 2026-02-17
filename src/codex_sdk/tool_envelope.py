@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from base64 import b64encode
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Literal, Mapping, Optional, Sequence, Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class ToolPlan:
       - ``final`` when no tool call is requested and final text is provided.
     """
 
-    kind: str
+    kind: Literal["tool_calls", "final"]
     calls: Tuple[ToolCallEnvelope, ...] = ()
     content: str = ""
 
@@ -53,8 +53,9 @@ def jsonable(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
 
-    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
-        return value.model_dump(mode="json")
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
 
     if isinstance(value, bytes):
         return {"type": "bytes", "base64": b64encode(value).decode("ascii")}
@@ -352,7 +353,8 @@ def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
     if isinstance(schema_type, list):
         # Support basic union form, e.g. ["string", "null"].
         if any(_matches_type(value, t) for t in schema_type):
-            # Validate against the first matching branch if provided through oneOf/anyOf.
+            # Type-list validation intentionally does not short-circuit composite
+            # schemas; anyOf/oneOf/allOf handling still runs below.
             pass
         else:
             raise ToolPlanValidationError(

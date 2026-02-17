@@ -4,6 +4,19 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 
 ## [0.101.0] - 2026-02-15
 
+### Added
+- New app-server wrappers for recently exposed endpoints, including
+  `thread_unarchive`, `thread_name_set`, `thread_compact_start`,
+  `thread_background_terminals_clean`, `turn_steer`, `experimental_feature_list`,
+  `account_chatgpt_auth_tokens_refresh`, `skills_config_write`,
+  `skills_remote_read`/`skills_remote_write`, `item_tool_call`,
+  `item_tool_request_user_input`, `item_command_execution_request_approval`,
+  `item_file_change_request_approval`, and `mock_experimental_method`.
+- New `tool_envelope` module for shared tool-call envelope parsing, normalization,
+  and schema validation utilities used by model-driven tool loops.
+- Pydantic-AI model provider hardening for request/usage/streaming compatibility
+  across API variants, with expanded integration coverage for robust tool-call flows.
+
 ### Updated
 - Bundled Codex CLI vendor binaries updated to 0.101.0 via `scripts/setup_binary.py`.
 - SDK version set to 0.101.0 to match the latest published Codex CLI stable release.

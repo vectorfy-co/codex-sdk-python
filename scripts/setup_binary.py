@@ -114,18 +114,39 @@ def download_codex_packages(version: str) -> Tuple[Path, List[Path]]:
     for target, suffix in TARGET_TO_SUFFIX.items():
         spec = f"@openai/codex@{version}-{suffix}"
         print(f"Downloading {spec} for {target}")
-        run_command(["npm", "pack", spec], cwd=temp_dir)
+        packed = run_command(["npm", "pack", spec], cwd=temp_dir, check=False)
+        if packed.returncode != 0:
+            print(
+                "WARNING: npm pack failed for "
+                f"{target} ({suffix}); skipping this target."
+            )
+            if packed.stderr:
+                print(packed.stderr.strip())
+            continue
         tarball = temp_dir / f"openai-codex-{version}-{suffix}.tgz"
         if not tarball.exists():
             matches = list(temp_dir.glob(f"openai-codex-*{suffix}.tgz"))
             if len(matches) != 1:
-                raise RuntimeError(f"Could not find tarball for {spec}")
+                print(
+                    "WARNING: Could not locate tarball for "
+                    f"{target} ({suffix}); skipping this target."
+                )
+                continue
             tarball = matches[0]
         package_dir = extract_tarball(tarball, temp_dir / f"platform-{suffix}")
         vendor_dir = package_dir / "vendor"
         if not vendor_dir.exists():
-            raise RuntimeError(f"Vendor directory not found in {spec}")
+            print(
+                "WARNING: Vendor directory missing for "
+                f"{target} ({suffix}); skipping this target."
+            )
+            continue
         package_dirs.append(package_dir)
+
+    if not package_dirs:
+        raise RuntimeError(
+            "Failed to download any platform-specific @openai/codex artifacts."
+        )
 
     return temp_dir, package_dirs
 

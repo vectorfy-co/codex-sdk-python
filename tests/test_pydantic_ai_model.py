@@ -143,6 +143,7 @@ def test_render_tool_definitions_renders_optional_tool_fields() -> None:
         "Output tools (use ONE of these to finish when text is not allowed):"
         in rendered
     )
+    # This test intentionally injects `sequential` on dummy tool objects.
     assert "sequential: true" in rendered
     assert "metadata:" in rendered
     assert "timeout:" in rendered

@@ -13,6 +13,7 @@ validation), while Codex behaves like a "backend model" that emits either:
 from __future__ import annotations
 
 import json
+import logging
 from base64 import b64encode
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, is_dataclass
@@ -43,6 +44,9 @@ except ImportError as exc:  # pragma: no cover
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
         'install with: uv add "codex-sdk-python[pydantic-ai]"'
     ) from exc
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -127,57 +131,47 @@ def _render_tool_definitions(
         The rendered, trimmed multi-line string describing the tools.
     """
     lines: List[str] = []
-    if function_tools:
-        lines.append("Function tools:")
-        for tool in function_tools:
-            lines.append(f"- {tool.name}")
-            if tool.description:
-                lines.append(f"  description: {tool.description}")
-            lines.append(f"  kind: {tool.kind}")
-            lines.append(
-                f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
-            )
-            if tool.outer_typed_dict_key:
-                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
-            if tool.strict is not None:
-                lines.append(f"  strict: {str(tool.strict).lower()}")
-            if getattr(tool, "sequential", False):
-                lines.append("  sequential: true")
-            metadata = getattr(tool, "metadata", None)
-            if metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(metadata)}")
-            timeout = getattr(tool, "timeout", None)
-            if timeout is not None:
-                lines.append(f"  timeout: {timeout}")
-
+    lines.extend(_render_tool_section("Function tools:", function_tools))
     if output_tools:
         if lines:
             lines.append("")
-        lines.append(
-            "Output tools (use ONE of these to finish when text is not allowed):"
-        )
-        for tool in output_tools:
-            lines.append(f"- {tool.name}")
-            if tool.description:
-                lines.append(f"  description: {tool.description}")
-            lines.append(f"  kind: {tool.kind}")
-            lines.append(
-                f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
+        lines.extend(
+            _render_tool_section(
+                "Output tools (use ONE of these to finish when text is not allowed):",
+                output_tools,
             )
-            if tool.outer_typed_dict_key:
-                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
-            if tool.strict is not None:
-                lines.append(f"  strict: {str(tool.strict).lower()}")
-            if getattr(tool, "sequential", False):
-                lines.append("  sequential: true")
-            metadata = getattr(tool, "metadata", None)
-            if metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(metadata)}")
-            timeout = getattr(tool, "timeout", None)
-            if timeout is not None:
-                lines.append(f"  timeout: {timeout}")
+        )
 
     return "\n".join(lines).strip()
+
+
+def _render_tool_section(title: str, tools: Sequence[ToolDefinition]) -> List[str]:
+    """Render one tool section to prompt lines."""
+    if not tools:
+        return []
+
+    lines: List[str] = [title]
+    for tool in tools:
+        lines.append(f"- {tool.name}")
+        if tool.description:
+            lines.append(f"  description: {tool.description}")
+        lines.append(f"  kind: {tool.kind}")
+        lines.append(
+            f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
+        )
+        if tool.outer_typed_dict_key:
+            lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
+        if tool.strict is not None:
+            lines.append(f"  strict: {str(tool.strict).lower()}")
+        if getattr(tool, "sequential", False):
+            lines.append("  sequential: true")
+        metadata = getattr(tool, "metadata", None)
+        if metadata is not None:
+            lines.append(f"  metadata: {_json_dumps(metadata)}")
+        timeout = getattr(tool, "timeout", None)
+        if timeout is not None:
+            lines.append(f"  timeout: {timeout}")
+    return lines
 
 
 def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
@@ -347,6 +341,14 @@ class CodexStreamedResponse(StreamedResponse):
                     tool_call_id=part.tool_call_id,
                 )
             else:
+                logger.debug(
+                    "Skipping unsupported streamed part",
+                    extra={
+                        "vendor_part_id": index,
+                        "part_type": type(part).__name__,
+                        "part_kind": getattr(part, "part_kind", None),
+                    },
+                )
                 event = None
 
             if event is not None:
@@ -401,7 +403,11 @@ class CodexStreamedResponse(StreamedResponse):
 
 
 class CodexModel(Model):
-    """Use Codex CLI as a PydanticAI model provider via structured output."""
+    """Use Codex CLI as a PydanticAI model provider via structured output.
+
+    Subclasses can override `prepare_request()` to mutate model settings and
+    request parameters before a Codex turn is executed.
+    """
 
     def __init__(
         self,
@@ -464,6 +470,14 @@ class CodexModel(Model):
         """Return the provider system identifier (vendor name)."""
         return self._system
 
+    def prepare_request(
+        self,
+        model_settings: Optional[ModelSettings],
+        model_request_parameters: ModelRequestParameters,
+    ) -> tuple[Optional[ModelSettings], ModelRequestParameters]:
+        """Hook to customize request settings/parameters before execution."""
+        return model_settings, model_request_parameters
+
     async def _run_codex_request(
         self,
         messages: list[ModelMessage],
@@ -488,10 +502,10 @@ class CodexModel(Model):
             - `model_request_parameters`: The (possibly customized) request parameters
               actually used for the request.
         """
-        del model_settings
-        model_request_parameters = self.customize_request_parameters(
-            model_request_parameters
+        model_settings, model_request_parameters = self.prepare_request(
+            model_settings, model_request_parameters
         )
+        del model_settings
 
         tool_defs = [
             *model_request_parameters.function_tools,
