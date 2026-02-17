@@ -3,22 +3,21 @@ import importlib
 
 import pytest
 
-import codex_sdk.integrations.pydantic_ai_model as pydantic_ai_model
+# ruff: noqa: E402
+# Imports are intentionally ordered around import-or-skip behavior.
 
 pydantic = pytest.importorskip("pydantic")
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
 
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
-    _attach_response_details,
+    CodexStreamedResponse,
     _build_envelope_schema,
-    _build_model_response,
     _final_from_envelope,
     _json_dumps,
     _jsonable,
-    _make_request_usage,
     _render_message_history,
     _render_tool_definitions,
     _tool_calls_from_envelope,
@@ -31,7 +30,6 @@ models = importlib.import_module("pydantic_ai.models")
 tools = importlib.import_module("pydantic_ai.tools")
 
 BuiltinToolCallPart = messages.BuiltinToolCallPart
-FilePart = getattr(messages, "FilePart", None)
 ModelRequest = messages.ModelRequest
 ModelResponse = messages.ModelResponse
 PartStartEvent = messages.PartStartEvent
@@ -44,35 +42,7 @@ ToolReturnPart = messages.ToolReturnPart
 UserPromptPart = messages.UserPromptPart
 ModelRequestParameters = models.ModelRequestParameters
 ToolDefinition = tools.ToolDefinition
-TOOL_DEFINITION_FIELDS = set(getattr(ToolDefinition, "__dataclass_fields__", {}).keys())
-
-
-def _usage_tokens(usage):
-    if hasattr(usage, "input_tokens"):
-        return (
-            usage.input_tokens,
-            getattr(usage, "cache_read_tokens", 0),
-            usage.output_tokens,
-        )
-    details = getattr(usage, "details", {}) or {}
-    return (
-        getattr(usage, "request_tokens", 0) or 0,
-        details.get("cache_read_tokens", 0),
-        getattr(usage, "response_tokens", 0) or 0,
-    )
-
-
-def _response_details(response):
-    details = getattr(response, "provider_details", None)
-    if details is not None:
-        return details
-    return getattr(response, "vendor_details", None)
-
-
-def _make_tool_definition(**kwargs):
-    return ToolDefinition(
-        **{key: value for key, value in kwargs.items() if key in TOOL_DEFINITION_FIELDS}
-    )
+RequestUsage = importlib.import_module("pydantic_ai.usage").RequestUsage
 
 
 class FakeThread:
@@ -137,13 +107,108 @@ async def test_codex_model_returns_tool_calls():
     assert response.parts[0].tool_name == "add"
     assert response.parts[0].tool_call_id == "call_1"
     assert response.parts[0].args == '{"a":1,"b":2}'
-    assert _usage_tokens(response.usage) == (1, 2, 3)
+    assert response.usage.input_tokens == 1
+    assert response.usage.cache_read_tokens == 2
+    assert response.usage.output_tokens == 3
+    assert response.usage.details == {"cached_input_tokens": 2}
 
     # Schema should restrict tool names
     enum = thread.last_schema["properties"]["tool_calls"]["items"]["properties"][
         "name"
     ]["enum"]
     assert enum == ["add"]
+
+
+def test_render_tool_definitions_renders_optional_tool_fields() -> None:
+    """Cover optional tool attributes rendered via getattr()."""
+    func = ToolDefinition(name="func", description="d1")
+    func.sequential = True
+    func.metadata = {"x": 1}
+    func.timeout = 3.0
+
+    func_no_desc = ToolDefinition(name="func2", description=None)
+
+    out = ToolDefinition(name="out", description="d2")
+    out.sequential = True
+    out.metadata = {"y": 2}
+    out.timeout = 9
+
+    out_no_desc = ToolDefinition(name="out2", description=None)
+
+    rendered = _render_tool_definitions(
+        function_tools=[func, func_no_desc], output_tools=[out, out_no_desc]
+    )
+    assert "Function tools:" in rendered
+    assert (
+        "Output tools (use ONE of these to finish when text is not allowed):"
+        in rendered
+    )
+    assert "sequential: true" in rendered
+    assert "metadata:" in rendered
+    assert "timeout:" in rendered
+    assert "- func2" in rendered
+    assert "- out2" in rendered
+
+
+def test_codex_model_does_not_override_explicit_thread_options() -> None:
+    """Cover CodexModel.__init__ branches when thread options are preconfigured."""
+    profiles = importlib.import_module("pydantic_ai.profiles")
+
+    thread = FakeThread({"tool_calls": [], "final": "ok"})
+    codex = FakeCodex(thread)
+    thread_options = importlib.import_module("codex_sdk.options").ThreadOptions(
+        skip_git_repo_check=False,
+        sandbox_mode="workspace-write",
+        approval_policy="on-request",
+        web_search_mode="live",
+        network_access_enabled=True,
+    )
+
+    profile = profiles.ModelProfile(supports_tools=False)
+    model = CodexModel(codex=codex, thread_options=thread_options, profile=profile)
+
+    assert model.model_name == "codex"
+    assert thread_options.skip_git_repo_check is False
+    assert thread_options.sandbox_mode == "workspace-write"
+    assert thread_options.approval_policy == "on-request"
+    assert thread_options.web_search_mode == "live"
+    assert thread_options.network_access_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_codex_model_usage_defaults_when_thread_usage_missing() -> None:
+    """Cover the branch where turn.usage is None and we return minimal usage."""
+
+    class FakeThreadNoUsage(FakeThread):
+        async def run_json(self, prompt, *, output_schema, turn_options=None):
+            self.last_prompt = prompt
+            self.last_schema = output_schema
+            turn = Turn(items=[], final_response="", usage=None)
+            return ParsedTurn(turn=turn, output={"tool_calls": [], "final": "hi"})
+
+    thread = FakeThreadNoUsage({"tool_calls": [], "final": "hi"})
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+
+    reqs = [ModelRequest(parts=[UserPromptPart("hi")])]
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    response = await model.request(reqs, None, params)
+
+    assert response.usage == RequestUsage()
+    assert response.parts and isinstance(response.parts[0], TextPart)
+
+
+@pytest.mark.asyncio
+async def test_codex_model_request_without_history() -> None:
+    """Cover the prompt path where message history is empty."""
+    thread = FakeThread({"tool_calls": [], "final": "hello"})
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    response = await model.request([], None, params)
+
+    assert response.parts and isinstance(response.parts[0], TextPart)
 
 
 @pytest.mark.asyncio
@@ -215,10 +280,9 @@ def test_json_dumps_falls_back_to_str_for_unserializable_objects():
 def test_render_tool_definitions_includes_output_tools_and_sequential():
     manifest = _render_tool_definitions(
         function_tools=[
-            _make_tool_definition(
+            ToolDefinition(
                 name="a",
                 description="A",
-                sequential=True,
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},
@@ -227,10 +291,10 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
             )
         ],
         output_tools=[
-            _make_tool_definition(
+            ToolDefinition(
                 name="final",
                 description="Final",
-                sequential=True,
+                kind="output",
                 parameters_json_schema={
                     "type": "object",
                     "properties": {},
@@ -241,8 +305,6 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
     )
     assert "Function tools:" in manifest
     assert "- a" in manifest
-    if "sequential" in TOOL_DEFINITION_FIELDS:
-        assert "sequential: true" in manifest
     assert "Output tools" in manifest
     assert "- final" in manifest
 
@@ -250,7 +312,7 @@ def test_render_tool_definitions_includes_output_tools_and_sequential():
 def test_render_tool_definitions_includes_metadata_and_timeout():
     manifest = _render_tool_definitions(
         function_tools=[
-            _make_tool_definition(
+            ToolDefinition(
                 name="metadata_tool",
                 description="With metadata",
                 parameters_json_schema={
@@ -258,29 +320,23 @@ def test_render_tool_definitions_includes_metadata_and_timeout():
                     "properties": {},
                     "additionalProperties": False,
                 },
-                metadata={"tier": "gold", "scope": ["read", "write"]},
-                timeout=2.5,
                 strict=True,
                 outer_typed_dict_key="payload",
-                kind="external",
+                kind="function",
             )
         ],
         output_tools=[],
     )
-    if "metadata" in TOOL_DEFINITION_FIELDS:
-        assert 'metadata: {"scope":["read","write"],"tier":"gold"}' in manifest
-    if "timeout" in TOOL_DEFINITION_FIELDS:
-        assert "timeout: 2.5" in manifest
     assert "strict: true" in manifest
     assert "outer_typed_dict_key: payload" in manifest
-    assert "kind: external" in manifest
+    assert "kind: function" in manifest
 
 
 def test_render_tool_definitions_includes_output_tool_metadata():
     manifest = _render_tool_definitions(
         function_tools=[],
         output_tools=[
-            _make_tool_definition(
+            ToolDefinition(
                 name="final",
                 description="Output",
                 parameters_json_schema={
@@ -288,18 +344,12 @@ def test_render_tool_definitions_includes_output_tool_metadata():
                     "properties": {},
                     "additionalProperties": False,
                 },
-                metadata={"priority": "high"},
-                timeout=1.0,
                 strict=False,
                 outer_typed_dict_key="payload",
                 kind="output",
             )
         ],
     )
-    if "metadata" in TOOL_DEFINITION_FIELDS:
-        assert 'metadata: {"priority":"high"}' in manifest
-    if "timeout" in TOOL_DEFINITION_FIELDS:
-        assert "timeout: 1.0" in manifest
     assert "strict: false" in manifest
     assert "outer_typed_dict_key: payload" in manifest
     assert "kind: output" in manifest
@@ -320,55 +370,24 @@ def test_envelope_extractors_filter_invalid_shapes():
             "final": "",
         }
     )
-    assert calls == []
+    assert [c.tool_call_id for c in calls] == ["x"]
     assert _final_from_envelope("nope") == ""
     assert _final_from_envelope({"final": 1}) == ""
-    assert _final_from_envelope({"final": "ok"}) == ""
-
-
-def test_final_from_envelope_returns_empty_for_tool_call_output():
-    assert (
-        _final_from_envelope(
-            {"tool_calls": [{"id": "x", "name": "t", "arguments": "{}"}], "final": ""}
-        )
-        == ""
-    )
-
-
-def test_render_tool_definitions_optional_fields_with_plain_tools():
-    class DummyTool:
-        def __init__(self, name):
-            self.name = name
-            self.description = "desc"
-            self.kind = "dummy"
-            self.parameters_json_schema = {"type": "object"}
-            self.outer_typed_dict_key = "payload"
-            self.strict = True
-            self.sequential = True
-            self.metadata = {"tier": "gold"}
-            self.timeout = 1.2
-
-    manifest = _render_tool_definitions(
-        function_tools=[DummyTool("fn")],
-        output_tools=[DummyTool("out")],
-    )
-    assert "sequential: true" in manifest
-    assert 'metadata: {"tier":"gold"}' in manifest
-    assert "timeout: 1.2" in manifest
+    assert _final_from_envelope({"final": "ok"}) == "ok"
 
 
 def test_render_message_history_includes_request_and_response_parts():
-    if FilePart is None:
+    class DummyFilePart:
+        part_kind = "file"
 
-        class CompatFilePart:
-            part_kind = "file"
+        def __init__(self, content: bytes) -> None:
+            """
+            Initialize the object with raw file content.
 
-            def __init__(self, content: bytes):
-                self.content = content
-
-        file_part = CompatFilePart(b"abc")
-    else:
-        file_part = FilePart(b"abc")
+            Parameters:
+                content (bytes): Raw bytes of the file to store on the instance.
+            """
+            self.content = content
 
     history = _render_message_history(
         [
@@ -379,7 +398,7 @@ def test_render_message_history_includes_request_and_response_parts():
                     UserPromptPart([{"type": "text", "text": "hi"}]),
                     ToolReturnPart("t", {"x": 1}, tool_call_id="call_1"),
                     RetryPromptPart("retry"),
-                    file_part,
+                    DummyFilePart(b"abc"),
                 ],
                 instructions="ins",
             ),
@@ -499,106 +518,31 @@ async def test_codex_model_request_stream_yields_response():
     assert len(response.parts) == 1
     assert isinstance(response.parts[0], TextPart)
     assert response.parts[0].content == "hello"
-    assert _response_details(response) == {"thread_id": "thread-123"}
-
-
-@pytest.mark.asyncio
-async def test_codex_model_request_stream_tool_call_branch_and_provider_properties():
-    output = {
-        "tool_calls": [{"id": "call_1", "name": "add", "arguments": '{"a":1}'}],
-        "final": "",
-    }
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
-    messages = [ModelRequest(parts=[UserPromptPart("hi")])]
-    params = ModelRequestParameters(
-        function_tools=[
-            ToolDefinition(
-                name="add",
-                description="add",
-                parameters_json_schema={"type": "object"},
-            )
-        ],
-        output_mode="tool",
-        allow_text_output=False,
-    )
-
-    async with model.request_stream(messages, None, params) as streamed:
-        events = [event async for event in streamed]
-        response = streamed.get()
-        assert streamed.provider_name == "codex"
-        assert streamed.provider_url is None
-
-    assert any(isinstance(event, PartStartEvent) for event in events)
-    assert len(response.parts) == 1
-    assert isinstance(response.parts[0], ToolCallPart)
-    assert response.parts[0].tool_name == "add"
-
-
-def test_make_request_usage_none_and_input_tokens_ctor(monkeypatch):
-    usage_none = _make_request_usage(None)
-    assert usage_none is not None
-
-    class CompatUsage:
-        def __init__(self, **kwargs):
-            self.input_tokens = kwargs.get("input_tokens", 0)
-            self.output_tokens = kwargs.get("output_tokens", 0)
-            self.cache_read_tokens = kwargs.get("cache_read_tokens", 0)
-
-    monkeypatch.setattr(pydantic_ai_model, "_REQUEST_USAGE_CTOR", CompatUsage)
-    usage = _make_request_usage(
-        Usage(input_tokens=1, cached_input_tokens=2, output_tokens=3)
-    )
-    assert usage.input_tokens == 1
-    assert usage.output_tokens == 3
-    assert usage.cache_read_tokens == 2
-
-
-def test_response_detail_compatibility_provider_details(monkeypatch):
-    class DummyResponse:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    monkeypatch.setattr(pydantic_ai_model, "ModelResponse", DummyResponse)
-    monkeypatch.setattr(
-        pydantic_ai_model,
-        "_MODEL_RESPONSE_FIELDS",
-        {"provider_name", "provider_details"},
-    )
-    response = _build_model_response(
-        parts=[],
-        usage=_make_request_usage(None),
-        model_name="codex",
-        details={"thread_id": "thread-123"},
-    )
-    assert response.kwargs["provider_name"] == "codex"
-    assert response.kwargs["provider_details"] == {"thread_id": "thread-123"}
-
-    target = type("Target", (), {})()
-    _attach_response_details(target, {"thread_id": "thread-123"})
-    assert target.provider_details == {"thread_id": "thread-123"}
-
-
-@pytest.mark.asyncio
-async def test_codex_model_uses_prepare_request_hook_when_present():
-    output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    model = CodexModel(codex=FakeCodex(thread))
-    called = {"value": False}
-
-    def prepare_request(model_settings, model_request_parameters):
-        called["value"] = True
-        return model_settings, model_request_parameters
-
-    model.prepare_request = prepare_request
-    await model.request(
-        [ModelRequest(parts=[UserPromptPart("hi")])],
-        None,
-        ModelRequestParameters(output_mode="text", allow_text_output=True),
-    )
-    assert called["value"] is True
+    assert response.provider_name == "openai"
+    assert response.provider_details == {"thread_id": "thread-123"}
 
 
 def test_codex_model_can_construct_codex_from_options():
     CodexModel(codex_options=CodexOptions(codex_path_override="codex-binary"))
+
+
+@pytest.mark.asyncio
+async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
+    """Streamed responses should emit events for tool calls and ignore other parts."""
+    resp = CodexStreamedResponse(
+        model_request_parameters=ModelRequestParameters(
+            output_mode="text",
+            allow_text_output=True,
+        ),
+        model_name="m",
+        provider_name="openai",
+        parts=[
+            ToolCallPart("t", args='{"x":1}', tool_call_id="call_1"),
+            ThinkingPart("..."),
+            TextPart("hello"),
+        ],
+        thread_id="thread-123",
+        usage=RequestUsage(),
+    )
+    events = [event async for event in resp]
+    assert events

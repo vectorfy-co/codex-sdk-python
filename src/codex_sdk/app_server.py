@@ -34,6 +34,7 @@ class AppServerClientInfo:
     version: str
 
     def as_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable representation for initialize()."""
         return {
             "name": self.name,
             "title": self.title,
@@ -51,6 +52,8 @@ class AppServerOptions:
     env: Optional[Mapping[str, str]] = None
     config_overrides: Optional[ConfigOverrides] = None
     client_info: Optional[AppServerClientInfo] = None
+    # Enables experimental app-server methods/fields gated behind initialize.capabilities.
+    experimental_api_enabled: bool = False
     auto_initialize: bool = True
     request_timeout: Optional[float] = None
 
@@ -93,6 +96,15 @@ class AppServerTurnSession:
         approvals: Optional[ApprovalDecisions] = None,
         initial_turn: Optional[Dict[str, Any]] = None,
     ) -> None:
+        """Create a session object for an already-started app-server turn.
+
+        Args:
+            client: AppServerClient used to communicate with the app-server.
+            thread_id: Thread id associated with the turn.
+            turn_id: Turn id returned by `turn/start`.
+            approvals: Optional auto-approval defaults for requestApproval prompts.
+            initial_turn: Optional turn object returned at session creation.
+        """
         self._client = client
         self.thread_id = thread_id
         self.turn_id = turn_id
@@ -108,6 +120,7 @@ class AppServerTurnSession:
         self._closed = False
 
     async def __aenter__(self) -> "AppServerTurnSession":
+        """Start the background pump and return the session."""
         await self.start()
         return self
 
@@ -117,14 +130,17 @@ class AppServerTurnSession:
         exc: Optional[BaseException],
         tb: Optional[Any],
     ) -> None:
+        """Close the session when used as an async context manager."""
         await self.close()
 
     async def start(self) -> None:
+        """Start the background pump if it is not running already."""
         if self._task is not None:
             return
         self._task = asyncio.create_task(self._pump())
 
     async def close(self) -> None:
+        """Cancel background work and unblock any pending iterators."""
         if self._closed:
             return
         self._closed = True
@@ -137,11 +153,13 @@ class AppServerTurnSession:
         self._done.set()
 
     async def wait(self) -> Optional[Dict[str, Any]]:
+        """Wait for the turn to reach a terminal notification and return it."""
         await self.start()
         await self._done.wait()
         return self.final_turn
 
     async def notifications(self) -> AsyncGenerator[AppServerNotification, None]:
+        """Yield notifications observed during the turn."""
         await self.start()
         while True:
             item = await self._notifications.get()
@@ -150,10 +168,12 @@ class AppServerTurnSession:
             yield item
 
     async def next_notification(self) -> Optional[AppServerNotification]:
+        """Return the next notification or None when the stream is closed."""
         await self.start()
         return await self._notifications.get()
 
     async def requests(self) -> AsyncGenerator[AppServerRequest, None]:
+        """Yield requests observed during the turn."""
         await self.start()
         while True:
             item = await self._requests.get()
@@ -162,6 +182,7 @@ class AppServerTurnSession:
             yield item
 
     async def next_request(self) -> Optional[AppServerRequest]:
+        """Return the next request or None when the stream is closed."""
         await self.start()
         return await self._requests.get()
 
@@ -274,6 +295,12 @@ class AppServerClient:
     """Async client for the Codex app-server."""
 
     def __init__(self, options: Optional[AppServerOptions] = None):
+        """Create an AppServerClient.
+
+        Args:
+            options: Optional configuration controlling the codex binary path, env,
+                client identity, timeouts, and whether to auto-initialize.
+        """
         if options is None:
             options = AppServerOptions()
         self._options = options
@@ -291,6 +318,7 @@ class AppServerClient:
         self._stderr_chunks: List[str] = []
 
     async def __aenter__(self) -> "AppServerClient":
+        """Start the app-server process and return the client."""
         await self.start()
         return self
 
@@ -300,9 +328,11 @@ class AppServerClient:
         exc: Optional[BaseException],
         tb: Optional[Any],
     ) -> None:
+        """Close the underlying app-server process on exit."""
         await self.close()
 
     async def start(self) -> None:
+        """Start the underlying `codex app-server` subprocess (idempotent)."""
         if self._process is not None:
             return
 
@@ -336,6 +366,7 @@ class AppServerClient:
             await self.initialize(self._options.client_info)
 
     async def close(self) -> None:
+        """Terminate the app-server subprocess and unblock pending requests."""
         if self._process is None:
             return
 
@@ -367,21 +398,48 @@ class AppServerClient:
     async def initialize(
         self, client_info: Optional[AppServerClientInfo] = None
     ) -> Dict[str, Any]:
+        """
+        Initialize the app-server client and register client information with the app-server.
+
+        Ensures the underlying subprocess is started, sends an `initialize` request containing the provided (or default) client information and the experimental API capability when enabled, then emits an `initialized` notification.
+
+        Args:
+            client_info: Client identity to register; if omitted, a default client identity is
+                used.
+
+        Returns:
+            The response payload returned by the app-server for the `initialize` request.
+        """
         if self._process is None:
             await self.start()
 
         if client_info is None:
             client_info = self._default_client_info()
 
-        result = await self._request_dict(
-            "initialize", {"clientInfo": client_info.as_dict()}
-        )
+        params: Dict[str, Any] = {"clientInfo": client_info.as_dict()}
+        if self._options.experimental_api_enabled:
+            params["capabilities"] = {"experimentalApi": True}
+
+        result = await self._request_dict("initialize", params)
         await self.notify("initialized")
         return result
 
     async def request(
         self, method: str, params: Optional[Dict[str, Any]] = None
     ) -> Any:
+        """Send a JSON-RPC request and await its result.
+
+        Args:
+            method: JSON-RPC method name.
+            params: Optional method parameters (must be JSON-serializable).
+
+        Returns:
+            The raw result value from the app-server.
+
+        Raises:
+            CodexError: If the client is not started or if the reader loop failed.
+            asyncio.TimeoutError: If request_timeout is configured and expires.
+        """
         self._ensure_ready()
         if self._reader_error is not None:
             raise CodexError("App-server reader failed") from self._reader_error
@@ -408,10 +466,12 @@ class AppServerClient:
     async def notify(
         self, method: str, params: Optional[Dict[str, Any]] = None
     ) -> None:
+        """Send a JSON-RPC notification (no response expected)."""
         self._ensure_ready()
         await self._send({"method": method, "params": params})
 
     async def notifications(self) -> AsyncGenerator[AppServerNotification, None]:
+        """Yield notifications emitted by the app-server until the client is closed."""
         while True:
             item = await self._notifications.get()
             if item is None:
@@ -419,10 +479,12 @@ class AppServerClient:
             yield item
 
     async def next_notification(self) -> Optional[AppServerNotification]:
+        """Return the next notification or None when the client is closed."""
         item = await self._notifications.get()
         return item
 
     async def requests(self) -> AsyncGenerator[AppServerRequest, None]:
+        """Yield incoming requests emitted by the app-server until the client is closed."""
         while True:
             item = await self._requests.get()
             if item is None:
@@ -430,6 +492,7 @@ class AppServerClient:
             yield item
 
     async def next_request(self) -> Optional[AppServerRequest]:
+        """Return the next incoming request or None when the client is closed."""
         return await self._requests.get()
 
     async def respond(
@@ -439,6 +502,13 @@ class AppServerClient:
         *,
         error: Optional[CodexAppServerError] = None,
     ) -> None:
+        """Respond to an app-server initiated request.
+
+        Args:
+            request_id: The request id from the app-server's JSON-RPC request.
+            result: Result value to return to the app-server.
+            error: Optional error payload to return instead of a result.
+        """
         if error is not None:
             payload = {
                 "id": request_id,
@@ -453,14 +523,17 @@ class AppServerClient:
         await self._send(payload)
 
     async def thread_start(self, **params: Any) -> Dict[str, Any]:
+        """Start a new thread on the app-server."""
         return await self._request_dict("thread/start", _coerce_keys(params))
 
     async def thread_resume(self, thread_id: str, **params: Any) -> Dict[str, Any]:
+        """Resume an existing thread on the app-server."""
         payload = {"threadId": thread_id}
         payload.update(_coerce_keys(params))
         return await self._request_dict("thread/resume", payload)
 
     async def thread_fork(self, thread_id: str, **params: Any) -> Dict[str, Any]:
+        """Fork an existing thread on the app-server."""
         payload = {"threadId": thread_id}
         payload.update(_coerce_keys(params))
         return await self._request_dict("thread/fork", payload)
@@ -468,6 +541,7 @@ class AppServerClient:
     async def thread_loaded_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
+        """List threads currently loaded by the app-server."""
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -480,16 +554,38 @@ class AppServerClient:
         *,
         cursor: Optional[str] = None,
         limit: Optional[int] = None,
+        sort_key: Optional[str] = None,
         model_providers: Optional[Sequence[str]] = None,
+        source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
     ) -> Dict[str, Any]:
+        """
+        Retrieve a page of threads from the app-server with optional filtering and sorting.
+
+        Args:
+            cursor: Pagination cursor to continue listing from.
+            limit: Maximum number of threads to return.
+            sort_key: Key to sort results by (server-defined).
+            model_providers: Filter threads by one or more model provider identifiers.
+            source_kinds: Filter threads by one or more source kinds.
+            archived: If set, restrict results to archived (`True`) or unarchived (`False`)
+                threads.
+
+        Returns:
+            The raw response dictionary returned by the app-server for the `thread/list`
+            request.
+        """
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
+        if sort_key is not None:
+            params["sort_key"] = sort_key
         if model_providers is not None:
             params["model_providers"] = list(model_providers)
+        if source_kinds is not None:
+            params["source_kinds"] = list(source_kinds)
         if archived is not None:
             params["archived"] = archived
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
@@ -497,40 +593,81 @@ class AppServerClient:
     async def thread_read(
         self, thread_id: str, *, include_turns: bool = False
     ) -> Dict[str, Any]:
+        """Read a thread by id from the app-server."""
         payload = {"thread_id": thread_id, "include_turns": include_turns}
         return await self._request_dict("thread/read", _coerce_keys(payload))
 
     async def thread_archive(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Archive the thread identified by `thread_id`.
+
+        Args:
+            thread_id: Identifier of the thread to archive.
+
+        Returns:
+            The app-server's response payload for the archive operation.
+        """
         return await self._request_dict("thread/archive", {"threadId": thread_id})
 
-    async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
-        return await self._request_dict("thread/unarchive", {"threadId": thread_id})
-
     async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
+        """
+        Set the display name for a thread.
+
+        Args:
+            thread_id: Identifier of the thread to rename.
+            name: New name to assign to the thread.
+
+        Returns:
+            Response payload returned by the app-server.
+        """
         return await self._request_dict(
             "thread/name/set", {"threadId": thread_id, "name": name}
         )
 
+    async def thread_unarchive(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Unarchives the thread identified by `thread_id`.
+
+        Args:
+            thread_id: Identifier of the thread to unarchive.
+
+        Returns:
+            Response dictionary from the app-server for the unarchive operation.
+        """
+        return await self._request_dict("thread/unarchive", {"threadId": thread_id})
+
     async def thread_compact_start(
-        self,
-        thread_id: str,
-        *,
-        instructions: Optional[str] = None,
+        self, thread_id: str, *, instructions: Optional[str] = None
     ) -> Dict[str, Any]:
+        """
+        Starts a compaction operation for the specified thread on the app-server.
+
+        Args:
+            thread_id: Identifier of the thread to compact.
+            instructions: Optional server hint for compaction behavior.
+
+        Returns:
+            dict: The app-server's result payload for the compaction start request.
+        """
         payload: Dict[str, Any] = {"thread_id": thread_id}
         if instructions is not None:
             payload["instructions"] = instructions
         return await self._request_dict("thread/compact/start", _coerce_keys(payload))
 
     async def thread_background_terminals_clean(
-        self,
-        thread_id: str,
-        *,
-        terminal_ids: Optional[Sequence[str]] = None,
+        self, thread_id: str, *, terminal_ids: Sequence[str]
     ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"thread_id": thread_id}
-        if terminal_ids is not None:
-            payload["terminal_ids"] = list(terminal_ids)
+        """
+        Clean up background terminal sessions for a thread.
+
+        Args:
+            thread_id: Identifier of the thread.
+            terminal_ids: Terminal ids to clean.
+
+        Returns:
+            App-server response payload.
+        """
+        payload = {"thread_id": thread_id, "terminal_ids": list(terminal_ids)}
         return await self._request_dict(
             "thread/backgroundTerminals/clean", _coerce_keys(payload)
         )
@@ -538,11 +675,22 @@ class AppServerClient:
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
     ) -> Dict[str, Any]:
+        """
+        Rolls back a thread by removing the specified number of turns.
+
+        Args:
+            thread_id: Identifier of the thread to roll back.
+            num_turns: Number of most recent turns to remove from the thread.
+
+        Returns:
+            dict: Result dictionary returned by the app-server for the rollback operation.
+        """
         return await self._request_dict(
             "thread/rollback", {"threadId": thread_id, "numTurns": num_turns}
         )
 
     async def config_requirements_read(self) -> Dict[str, Any]:
+        """Read config requirements metadata from the app-server."""
         return await self._request_dict("configRequirements/read")
 
     async def config_read(
@@ -551,6 +699,12 @@ class AppServerClient:
         include_layers: bool = False,
         cwd: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
+        """Read configuration from the app-server.
+
+        Args:
+            include_layers: If True, include configuration layer details in the response.
+            cwd: Optional working directory used for config resolution.
+        """
         params = {
             "include_layers": include_layers,
             "cwd": str(cwd) if cwd is not None else None,
@@ -566,6 +720,7 @@ class AppServerClient:
         file_path: Optional[str] = None,
         expected_version: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Write a single configuration value via the app-server."""
         params = {
             "key_path": key_path,
             "value": value,
@@ -582,6 +737,7 @@ class AppServerClient:
         file_path: Optional[str] = None,
         expected_version: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Apply multiple configuration edits in a single app-server request."""
         params = {
             "edits": list(edits),
             "file_path": file_path,
@@ -595,10 +751,91 @@ class AppServerClient:
         cwds: Optional[Sequence[Union[str, Path]]] = None,
         force_reload: bool = False,
     ) -> Dict[str, Any]:
+        """
+        List skills available to the app-server, optionally scoped to specific working directories.
+
+        Args:
+            cwds: Sequence of directory paths to scope the skills listing; each path will be
+                converted to a string. If omitted, the server uses its default scope.
+            force_reload: If true, instructs the server to reload skill data before returning
+                results.
+
+        Returns:
+            The parsed response payload from the `skills/list` app-server method.
+        """
         payload: Dict[str, Any] = {"force_reload": force_reload}
         if cwds:
             payload["cwds"] = [str(path) for path in cwds]
         return await self._request_dict("skills/list", _coerce_keys(payload))
+
+    async def skills_remote_read(
+        self, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Read remote skills metadata from the app server.
+
+        Args:
+            params: Optional request payload.
+
+        Returns:
+            result (Dict[str, Any]): The app-server response payload for the `skills/remote/read` request.
+        """
+        payload = _coerce_keys(dict(params)) if params is not None else {}
+        return await self._request_dict("skills/remote/read", payload)
+
+    async def skills_remote_write(
+        self,
+        *,
+        hazelnut_id: Optional[str] = None,
+        is_preload: Optional[bool] = None,
+        params: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Start a remote skill write operation.
+
+        Args:
+            hazelnut_id: Optional Hazelnut identifier.
+            is_preload: Optional preload flag.
+            params: Optional raw request payload.
+
+        Returns:
+            Result returned by the app-server for the "skills/remote/write" request.
+        """
+        payload: Dict[str, Any] = {}
+        if params is not None:
+            payload.update(_coerce_keys(dict(params)))
+        if hazelnut_id is not None:
+            payload["hazelnut_id"] = hazelnut_id
+        if is_preload is not None:
+            payload["is_preload"] = is_preload
+        return await self._request_dict("skills/remote/write", _coerce_keys(payload))
+
+    async def skills_config_write(
+        self,
+        *,
+        path: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        params: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Set skill configuration state.
+
+        Args:
+            path: Optional configuration path identifying the skill.
+            enabled: Optional enabled state for the skill.
+            params: Optional raw request payload.
+
+        Returns:
+            The app-server response as a dictionary.
+        """
+        payload: Dict[str, Any] = {}
+        if params is not None:
+            payload.update(_coerce_keys(dict(params)))
+        if path is not None:
+            payload["path"] = path
+        if enabled is not None:
+            payload["enabled"] = enabled
+        return await self._request_dict("skills/config/write", payload)
 
     async def turn_start(
         self,
@@ -606,6 +843,19 @@ class AppServerClient:
         input: AppServerInput,
         **params: Any,
     ) -> Dict[str, Any]:
+        """
+        Start a new turn in the specified thread using the provided user input.
+
+        Args:
+            thread_id: Identifier of the thread to start the turn in.
+            input: User input for the turn; may be a string or a sequence of input items and
+                will be normalized to the app-server format.
+            **params: Additional optional request parameters; keys with None values are omitted
+                and snake_case keys are converted to camelCase.
+
+        Returns:
+            The app-server's response payload for the started turn.
+        """
         payload = {"threadId": thread_id, "input": normalize_app_server_input(input)}
         payload.update(_coerce_keys(params))
         return await self._request_dict("turn/start", payload)
@@ -617,6 +867,7 @@ class AppServerClient:
         target: Mapping[str, Any],
         delivery: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Start a review run for the given thread and target payload."""
         payload: Dict[str, Any] = {"thread_id": thread_id, "target": dict(target)}
         if delivery is not None:
             payload["delivery"] = delivery
@@ -649,25 +900,32 @@ class AppServerClient:
         return session
 
     async def turn_interrupt(self, thread_id: str, turn_id: str) -> Dict[str, Any]:
+        """Interrupt an in-progress turn."""
         return await self._request_dict(
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
         )
 
     async def turn_steer(
-        self,
-        thread_id: str,
-        turn_id: str,
-        *,
-        prompt: str,
+        self, thread_id: str, turn_id: str, *, prompt: str
     ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "turn/steer",
-            {"threadId": thread_id, "turnId": turn_id, "prompt": prompt},
-        )
+        """
+        Send steering guidance to an in-progress turn.
+
+        Args:
+            thread_id: Identifier of the thread.
+            turn_id: Identifier of the turn.
+            prompt: Steering prompt text.
+
+        Returns:
+            App-server response payload.
+        """
+        payload = {"thread_id": thread_id, "turn_id": turn_id, "prompt": prompt}
+        return await self._request_dict("turn/steer", _coerce_keys(payload))
 
     async def model_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
+        """List models available to the app-server."""
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -678,6 +936,7 @@ class AppServerClient:
     async def app_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
+        """List apps/connectors available to the app-server."""
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -686,14 +945,22 @@ class AppServerClient:
         return await self._request_dict("app/list", params or None)
 
     async def collaboration_mode_list(self) -> Dict[str, Any]:
+        """List supported collaboration modes from the app-server."""
         return await self._request_dict("collaborationMode/list", {})
 
     async def experimental_feature_list(
-        self,
-        *,
-        cursor: Optional[str] = None,
-        limit: Optional[int] = None,
+        self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
+        """
+        List experimental features available from the app-server.
+
+        Args:
+            cursor: Optional pagination cursor.
+            limit: Optional page size.
+
+        Returns:
+            App-server response payload.
+        """
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -709,6 +976,7 @@ class AppServerClient:
         cwd: Optional[Union[str, Path]] = None,
         sandbox_policy: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Execute a command via the app-server command execution endpoint."""
         params: Dict[str, Any] = {"command": list(command)}
         if timeout_ms is not None:
             params["timeout_ms"] = timeout_ms
@@ -721,17 +989,20 @@ class AppServerClient:
     async def mcp_server_oauth_login(
         self, *, name: str, scopes: Optional[Sequence[str]] = None
     ) -> Dict[str, Any]:
+        """Start an MCP server OAuth login flow."""
         params: Dict[str, Any] = {"name": name}
         if scopes is not None:
             params["scopes"] = list(scopes)
         return await self._request_dict("mcpServer/oauth/login", _coerce_keys(params))
 
     async def mcp_server_refresh(self) -> Dict[str, Any]:
+        """Refresh MCP server configuration/status."""
         return await self._request_dict("config/mcpServer/reload")
 
     async def mcp_server_status_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
+        """List MCP server status entries with optional pagination."""
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
@@ -740,93 +1011,117 @@ class AppServerClient:
         return await self._request_dict("mcpServerStatus/list", params or None)
 
     async def account_login_start(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
+        """Start an account login flow via the app-server."""
         return await self._request_dict("account/login/start", dict(params))
 
     async def account_login_cancel(self, *, login_id: str) -> Dict[str, Any]:
+        """Cancel an in-progress login flow."""
         return await self._request_dict("account/login/cancel", {"loginId": login_id})
 
     async def account_logout(self) -> Dict[str, Any]:
+        """Log out of the current account session."""
         return await self._request_dict("account/logout")
 
     async def account_rate_limits_read(self) -> Dict[str, Any]:
+        """Read current account rate limits from the app-server."""
         return await self._request_dict("account/rateLimits/read")
 
     async def account_read(self, *, refresh_token: bool = False) -> Dict[str, Any]:
+        """Read account information, optionally refreshing the token."""
         return await self._request_dict(
             "account/read", {"refreshToken": refresh_token} if refresh_token else None
         )
 
     async def account_chatgpt_auth_tokens_refresh(
-        self, *, params: Optional[Mapping[str, Any]] = None
+        self, *, params: Mapping[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Refresh ChatGPT auth tokens via the app-server.
+
+        Args:
+            params: Refresh payload (snake_case or camelCase keys are accepted).
+
+        Returns:
+            App-server response payload.
+        """
         return await self._request_dict(
-            "account/chatgptAuthTokens/refresh",
-            _coerce_keys(params) if params is not None else None,
+            "account/chatgptAuthTokens/refresh", _coerce_keys(dict(params))
         )
 
-    async def skills_config_write(
-        self, *, params: Optional[Mapping[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "skills/config/write",
-            _coerce_keys(params) if params is not None else None,
-        )
+    async def item_tool_call(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
+        """
+        Send an item tool-call payload.
 
-    async def skills_remote_read(
-        self, *, params: Optional[Mapping[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "skills/remote/read",
-            _coerce_keys(params) if params is not None else None,
-        )
+        Args:
+            params: Request payload for `item/tool/call`.
 
-    async def skills_remote_write(
-        self, *, params: Optional[Mapping[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "skills/remote/write",
-            _coerce_keys(params) if params is not None else None,
-        )
-
-    async def item_tool_call(
-        self, *, params: Optional[Mapping[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "item/tool/call",
-            _coerce_keys(params) if params is not None else None,
-        )
+        Returns:
+            App-server response payload.
+        """
+        return await self._request_dict("item/tool/call", _coerce_keys(dict(params)))
 
     async def item_tool_request_user_input(
-        self, *, params: Optional[Mapping[str, Any]] = None
+        self, *, params: Mapping[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Send an item request-user-input payload.
+
+        Args:
+            params: Request payload for `item/tool/requestUserInput`.
+
+        Returns:
+            App-server response payload.
+        """
         return await self._request_dict(
-            "item/tool/requestUserInput",
-            _coerce_keys(params) if params is not None else None,
+            "item/tool/requestUserInput", _coerce_keys(dict(params))
         )
 
     async def item_command_execution_request_approval(
-        self, *, params: Optional[Mapping[str, Any]] = None
+        self, *, params: Mapping[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Send an item command-execution approval payload.
+
+        Args:
+            params: Request payload for `item/commandExecution/requestApproval`.
+
+        Returns:
+            App-server response payload.
+        """
         return await self._request_dict(
-            "item/commandExecution/requestApproval",
-            _coerce_keys(params) if params is not None else None,
+            "item/commandExecution/requestApproval", _coerce_keys(dict(params))
         )
 
     async def item_file_change_request_approval(
-        self, *, params: Optional[Mapping[str, Any]] = None
+        self, *, params: Mapping[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Send an item file-change approval payload.
+
+        Args:
+            params: Request payload for `item/fileChange/requestApproval`.
+
+        Returns:
+            App-server response payload.
+        """
         return await self._request_dict(
-            "item/fileChange/requestApproval",
-            _coerce_keys(params) if params is not None else None,
+            "item/fileChange/requestApproval", _coerce_keys(dict(params))
         )
 
     async def mock_experimental_method(
         self, *, params: Optional[Mapping[str, Any]] = None
     ) -> Dict[str, Any]:
-        return await self._request_dict(
-            "mock/experimentalMethod",
-            _coerce_keys(params) if params is not None else None,
-        )
+        """
+        Call a mock experimental app-server endpoint.
+
+        Args:
+            params: Optional request payload.
+
+        Returns:
+            App-server response payload.
+        """
+        payload = _coerce_keys(dict(params)) if params is not None else {}
+        return await self._request_dict("mock/experimentalMethod", payload)
 
     async def feedback_upload(
         self,
@@ -836,6 +1131,7 @@ class AppServerClient:
         thread_id: Optional[str] = None,
         include_logs: bool = False,
     ) -> Dict[str, Any]:
+        """Upload user feedback to the app-server."""
         params = {
             "classification": classification,
             "reason": reason,
@@ -953,17 +1249,23 @@ class AppServerClient:
 
 
 class AppServerByteRange(TypedDict):
+    """Byte range for a text element (inclusive/exclusive semantics are server-defined)."""
+
     start: int
     end: int
 
 
 class AppServerTextElement(TypedDict, total=False):
+    """Text element metadata for app-server inputs."""
+
     byte_range: AppServerByteRange
     byteRange: AppServerByteRange
     placeholder: Optional[str]
 
 
 class AppServerTextInput(TypedDict, total=False):
+    """Text input item for the app-server protocol."""
+
     type: str
     text: str
     text_elements: List[AppServerTextElement]
@@ -971,16 +1273,22 @@ class AppServerTextInput(TypedDict, total=False):
 
 
 class AppServerImageInput(TypedDict):
+    """Remote image input item for the app-server protocol."""
+
     type: str
     url: str
 
 
 class AppServerLocalImageInput(TypedDict):
+    """Local image input item for the app-server protocol."""
+
     type: str
     path: str
 
 
 class AppServerSkillInput(TypedDict):
+    """Skill input item for the app-server protocol."""
+
     type: str
     name: str
     path: str
@@ -997,6 +1305,7 @@ AppServerInput = Union[Sequence[AppServerUserInput], str]
 
 
 def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
+    """Normalize supported SDK inputs into the canonical app-server wire shape."""
     if isinstance(input, str):
         return [{"type": "text", "text": input}]
 
@@ -1021,6 +1330,7 @@ def normalize_app_server_input(input: AppServerInput) -> List[Dict[str, Any]]:
 
 
 def _normalize_text_elements(item: Dict[str, Any]) -> None:
+    """Normalize snake_case metadata keys to the app-server's camelCase shape."""
     elements = None
     if isinstance(item.get("textElements"), list):
         elements = item.get("textElements")
@@ -1044,6 +1354,7 @@ def _normalize_text_elements(item: Dict[str, Any]) -> None:
 
 
 def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """Coerce snake_case keys to camelCase and drop None values."""
     coerced: Dict[str, Any] = {}
     for key, value in params.items():
         if value is None:
@@ -1055,6 +1366,7 @@ def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _snake_to_camel(value: str) -> str:
+    """Convert snake_case strings to lowerCamelCase."""
     parts = value.split("_")
     return parts[0] + "".join(word.capitalize() for word in parts[1:])
 
@@ -1063,6 +1375,7 @@ def _normalize_decision(
     decision: Union[str, Mapping[str, Any]],
     execpolicy_amendment: Optional[Mapping[str, Any]],
 ) -> Union[str, Dict[str, Any]]:
+    """Normalize approval decisions into the JSON-RPC protocol encoding."""
     if isinstance(decision, Mapping):
         return dict(decision)
     if not isinstance(decision, str):
@@ -1088,6 +1401,7 @@ def _normalize_decision(
 
 
 def _extract_turn(notification: AppServerNotification) -> Optional[Dict[str, Any]]:
+    """Extract a turn object from a notification payload (best effort)."""
     params = notification.params
     if not isinstance(params, dict):
         return None
@@ -1100,6 +1414,7 @@ def _extract_turn(notification: AppServerNotification) -> Optional[Dict[str, Any
 
 
 async def _drain_stream(stream: asyncio.StreamReader, sink: list[str]) -> None:
+    """Continuously read a stream and append decoded lines to sink."""
     while True:
         chunk = await stream.readline()
         if not chunk:
@@ -1108,6 +1423,7 @@ async def _drain_stream(stream: asyncio.StreamReader, sink: list[str]) -> None:
 
 
 async def _iter_lines(stream: asyncio.StreamReader) -> AsyncGenerator[str, None]:
+    """Yield decoded lines from a stream until it is exhausted."""
     while True:
         line = await stream.readline()
         if not line:
