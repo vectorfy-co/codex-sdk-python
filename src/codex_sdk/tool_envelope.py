@@ -350,12 +350,18 @@ def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
         )
 
     schema_type = schema.get("type")
+    resolved_type: Optional[str] = None
     if isinstance(schema_type, list):
         # Support basic union form, e.g. ["string", "null"].
-        if any(_matches_type(value, t) for t in schema_type):
-            # Type-list validation intentionally does not short-circuit composite
-            # schemas; anyOf/oneOf/allOf handling still runs below.
-            pass
+        matched_types = [t for t in schema_type if _matches_type(value, t)]
+        if matched_types:
+            if "object" in matched_types and isinstance(value, dict):
+                resolved_type = "object"
+            elif "array" in matched_types and isinstance(value, list):
+                resolved_type = "array"
+            else:
+                first = matched_types[0]
+                resolved_type = first if isinstance(first, str) else None
         else:
             raise ToolPlanValidationError(
                 "invalid_tool_arguments",
@@ -363,6 +369,7 @@ def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
             )
     elif isinstance(schema_type, str):
         _require_type(value, schema_type, path=path)
+        resolved_type = schema_type
 
     # Composite schemas.
     any_of = schema.get("anyOf")
@@ -392,9 +399,9 @@ def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
         for branch in all_of:
             _validate_json_schema(value, branch, path=path)
 
-    if schema_type == "object":
+    if resolved_type == "object":
         _validate_object_schema(value, schema, path=path)
-    elif schema_type == "array":
+    elif resolved_type == "array":
         _validate_array_schema(value, schema, path=path)
 
 

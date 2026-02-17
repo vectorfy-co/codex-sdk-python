@@ -419,6 +419,45 @@ def test_validate_json_schema_array_validation_paths() -> None:
         )
 
 
+def test_validate_json_schema_union_runs_object_constraints() -> None:
+    with pytest.raises(ToolPlanValidationError):
+        _validate_json_schema(
+            {},
+            {
+                "type": ["object", "null"],
+                "required": ["a"],
+            },
+            path="obj",
+        )
+
+    with pytest.raises(ToolPlanValidationError):
+        _validate_json_schema(
+            {"a": 1, "b": "x"},
+            {
+                "type": ["object", "null"],
+                "properties": {"a": {"type": "integer"}},
+                "additionalProperties": {"type": "integer"},
+            },
+            path="obj",
+        )
+
+
+def test_validate_json_schema_union_runs_array_constraints() -> None:
+    with pytest.raises(ToolPlanValidationError):
+        _validate_json_schema(
+            [1, "x"],
+            {"type": ["array", "null"], "items": {"type": "integer"}},
+            path="arr",
+        )
+
+    with pytest.raises(ToolPlanValidationError):
+        _validate_json_schema(
+            [1],
+            {"type": ["array", "null"], "minItems": 2},
+            path="arr",
+        )
+
+
 def test_validate_any_of_false_and_true() -> None:
     assert _validate_any_of("a", [{"const": "b"}], path="root") is False
     assert _validate_any_of("a", [{"const": "a"}], path="root") is True

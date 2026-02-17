@@ -35,6 +35,7 @@
 - Commit messages are short, imperative, and sentence case (e.g., "Fix ruff lint issues").
 - PRs should describe the change, note test commands run, and link related issues.
 - If behavior or public docs change, update `README.md` and `CHANGELOG_SDK.md`.
+- For PR-review fixes, do not leave validated changes local-only: after tests pass, commit and push to the active PR branch in the same iteration.
 
 ## Security & Configuration Tips
 - Authenticate the local Codex CLI with `codex login` after installing binaries.
