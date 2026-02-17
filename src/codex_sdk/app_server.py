@@ -808,7 +808,7 @@ class AppServerClient:
             payload["hazelnut_id"] = hazelnut_id
         if is_preload is not None:
             payload["is_preload"] = is_preload
-        return await self._request_dict("skills/remote/write", _coerce_keys(payload))
+        return await self._request_dict("skills/remote/write", payload)
 
     async def skills_config_write(
         self,
