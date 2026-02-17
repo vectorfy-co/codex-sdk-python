@@ -163,7 +163,9 @@ async def test_app_server_notify_and_respond(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
-    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    client = AppServerClient(
+        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
+    )
     await client.start()
 
     await client.notify("ping", {"ok": True})
@@ -197,6 +199,26 @@ async def test_app_server_notify_and_respond(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+async def test_mock_experimental_method_requires_experimental_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    with pytest.raises(CodexError):
+        await client.mock_experimental_method(params={"ok": True})
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_app_server_methods_and_input_normalization(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -207,7 +229,9 @@ async def test_app_server_methods_and_input_normalization(
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
-    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    client = AppServerClient(
+        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
+    )
     await client.start()
 
     async def expect_request(task: asyncio.Task, expected_method: str, result: Any):
