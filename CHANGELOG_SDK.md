@@ -2,6 +2,18 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.101.0] - 2026-02-15
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to 0.101.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.101.0 to match the latest published Codex CLI stable release.
+- `scripts/setup_binary.py` now supports the current npm packaging model that ships
+  platform-specific `@openai/codex@<version>-<target>` artifacts.
+
+### Notes
+- Upstream `0.103.0` was not available on public GitHub/npm release channels during this
+  update run; the sync is pinned to the latest published stable (`0.101.0`).
+
 ## [0.91.0] - 2026-01-27
 
 ### Added

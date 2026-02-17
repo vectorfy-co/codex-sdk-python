@@ -12,20 +12,25 @@ validation), while Codex behaves like a "backend model" that emits either:
 
 from __future__ import annotations
 
-import json
-from base64 import b64encode
 from contextlib import asynccontextmanager
-from dataclasses import InitVar, asdict, dataclass, field, is_dataclass
+from dataclasses import InitVar, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, cast
 
 from ..codex import Codex
 from ..options import CodexOptions, ThreadOptions
 from ..telemetry import span
 from ..thread import TurnOptions
+from ..tool_envelope import (
+    ToolCallEnvelope,
+    ToolPlanValidationError,
+    build_envelope_schema,
+    json_dumps,
+    jsonable,
+    parse_tool_plan,
+)
 
 try:
-    from pydantic_ai import RunContext
     from pydantic_ai.messages import (
         ModelMessage,
         ModelRequest,
@@ -38,70 +43,32 @@ try:
     from pydantic_ai.profiles import ModelProfile, ModelProfileSpec
     from pydantic_ai.settings import ModelSettings
     from pydantic_ai.tools import ToolDefinition
-    from pydantic_ai.usage import RequestUsage
+    from pydantic_ai.usage import Usage as _Usage
+
+    try:
+        from pydantic_ai.usage import RequestUsage as _RequestUsage
+    except ImportError:
+        _RequestUsage = _Usage
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "pydantic-ai is required for codex_sdk.integrations.pydantic_ai_model; "
         'install with: uv add "codex-sdk-python[pydantic-ai]"'
     ) from exc
 
-
-@dataclass(frozen=True)
-class _ToolCallEnvelope:
-    tool_call_id: str
-    tool_name: str
-    arguments_json: str
+_REQUEST_USAGE_CTOR = cast(Any, _RequestUsage)
+_MODEL_RESPONSE_FIELDS = set(getattr(ModelResponse, "__dataclass_fields__", {}).keys())
 
 
 def _jsonable(value: Any) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
-        return value.model_dump(mode="json")
-    if isinstance(value, bytes):
-        return {"type": "bytes", "base64": b64encode(value).decode("ascii")}
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    return value
+    return jsonable(value)
 
 
 def _json_dumps(value: Any) -> str:
-    try:
-        return json.dumps(
-            _jsonable(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
-        )
-    except TypeError:
-        return str(value)
+    return json_dumps(value)
 
 
 def _build_envelope_schema(tool_names: Sequence[str]) -> Dict[str, Any]:
-    name_schema: Dict[str, Any] = {"type": "string"}
-    if tool_names:
-        name_schema = {"type": "string", "enum": list(tool_names)}
-
-    return {
-        "type": "object",
-        "properties": {
-            "tool_calls": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string"},
-                        "name": name_schema,
-                        "arguments": {"type": "string"},
-                    },
-                    "required": ["id", "name", "arguments"],
-                    "additionalProperties": False,
-                },
-            },
-            "final": {"type": "string"},
-        },
-        "required": ["tool_calls", "final"],
-        "additionalProperties": False,
-    }
+    return build_envelope_schema(tool_names)
 
 
 def _render_tool_definitions(
@@ -116,20 +83,26 @@ def _render_tool_definitions(
             lines.append(f"- {tool.name}")
             if tool.description:
                 lines.append(f"  description: {tool.description}")
-            lines.append(f"  kind: {tool.kind}")
+            kind = getattr(tool, "kind", None)
+            if kind is not None:
+                lines.append(f"  kind: {kind}")
             lines.append(
                 f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
             )
-            if tool.outer_typed_dict_key:
-                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
-            if tool.strict is not None:
-                lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            outer_typed_dict_key = getattr(tool, "outer_typed_dict_key", None)
+            if outer_typed_dict_key:
+                lines.append(f"  outer_typed_dict_key: {outer_typed_dict_key}")
+            strict = getattr(tool, "strict", None)
+            if strict is not None:
+                lines.append(f"  strict: {str(strict).lower()}")
+            if bool(getattr(tool, "sequential", False)):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     if output_tools:
         if lines:
@@ -141,60 +114,49 @@ def _render_tool_definitions(
             lines.append(f"- {tool.name}")
             if tool.description:
                 lines.append(f"  description: {tool.description}")
-            lines.append(f"  kind: {tool.kind}")
+            kind = getattr(tool, "kind", None)
+            if kind is not None:
+                lines.append(f"  kind: {kind}")
             lines.append(
                 f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
             )
-            if tool.outer_typed_dict_key:
-                lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
-            if tool.strict is not None:
-                lines.append(f"  strict: {str(tool.strict).lower()}")
-            if tool.sequential:
+            outer_typed_dict_key = getattr(tool, "outer_typed_dict_key", None)
+            if outer_typed_dict_key:
+                lines.append(f"  outer_typed_dict_key: {outer_typed_dict_key}")
+            strict = getattr(tool, "strict", None)
+            if strict is not None:
+                lines.append(f"  strict: {str(strict).lower()}")
+            if bool(getattr(tool, "sequential", False)):
                 lines.append("  sequential: true")
-            if tool.metadata is not None:
-                lines.append(f"  metadata: {_json_dumps(tool.metadata)}")
-            if tool.timeout is not None:
-                lines.append(f"  timeout: {tool.timeout}")
+            metadata = getattr(tool, "metadata", None)
+            if metadata is not None:
+                lines.append(f"  metadata: {_json_dumps(metadata)}")
+            timeout = getattr(tool, "timeout", None)
+            if timeout is not None:
+                lines.append(f"  timeout: {timeout}")
 
     return "\n".join(lines).strip()
 
 
-def _tool_calls_from_envelope(output: Any) -> List[_ToolCallEnvelope]:
-    if not isinstance(output, dict):
+def _tool_calls_from_envelope(output: Any) -> List[ToolCallEnvelope]:
+    try:
+        plan = parse_tool_plan(output)
+    except ToolPlanValidationError:
         return []
 
-    raw_calls = output.get("tool_calls")
-    if not isinstance(raw_calls, list):
+    if plan.kind != "tool_calls":
         return []
-
-    calls: List[_ToolCallEnvelope] = []
-    for call in raw_calls:
-        if not isinstance(call, dict):
-            continue
-        tool_call_id = call.get("id")
-        tool_name = call.get("name")
-        arguments = call.get("arguments")
-        if not isinstance(tool_call_id, str) or not tool_call_id:
-            continue
-        if not isinstance(tool_name, str) or not tool_name:
-            continue
-        if not isinstance(arguments, str):
-            continue
-        calls.append(
-            _ToolCallEnvelope(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments_json=arguments,
-            )
-        )
-    return calls
+    return list(plan.calls)
 
 
 def _final_from_envelope(output: Any) -> str:
-    if not isinstance(output, dict):
+    try:
+        plan = parse_tool_plan(output)
+    except ToolPlanValidationError:
         return ""
-    final = output.get("final")
-    return final if isinstance(final, str) else ""
+    if plan.kind != "final":
+        return ""
+    return plan.content
 
 
 def _render_message_history(messages: Sequence[ModelMessage]) -> str:
@@ -265,6 +227,64 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _make_request_usage(turn_usage: Optional[Any]) -> _Usage:
+    usage = cast(_Usage, _REQUEST_USAGE_CTOR())
+    if turn_usage is None:
+        return usage
+
+    input_tokens = int(turn_usage.input_tokens)
+    output_tokens = int(turn_usage.output_tokens)
+    cached_input_tokens = int(turn_usage.cached_input_tokens)
+
+    if hasattr(usage, "input_tokens"):
+        return cast(
+            _Usage,
+            _REQUEST_USAGE_CTOR(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cached_input_tokens,
+            ),
+        )
+
+    details = (
+        {"cache_read_tokens": cached_input_tokens} if cached_input_tokens else None
+    )
+    return cast(
+        _Usage,
+        _REQUEST_USAGE_CTOR(
+            requests=1,
+            request_tokens=input_tokens,
+            response_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            details=details,
+        ),
+    )
+
+
+def _attach_response_details(response: ModelResponse, details: Dict[str, Any]) -> None:
+    if "provider_details" in _MODEL_RESPONSE_FIELDS:
+        setattr(response, "provider_details", details)
+    elif "vendor_details" in _MODEL_RESPONSE_FIELDS:
+        setattr(response, "vendor_details", details)
+
+
+def _build_model_response(
+    *,
+    parts: List[Any],
+    usage: _Usage,
+    model_name: str,
+    details: Dict[str, Any],
+) -> ModelResponse:
+    kwargs: Dict[str, Any] = {"parts": parts, "usage": usage, "model_name": model_name}
+    if "provider_name" in _MODEL_RESPONSE_FIELDS:
+        kwargs["provider_name"] = "codex"
+    if "provider_details" in _MODEL_RESPONSE_FIELDS:
+        kwargs["provider_details"] = details
+    elif "vendor_details" in _MODEL_RESPONSE_FIELDS:
+        kwargs["vendor_details"] = details
+    return ModelResponse(**kwargs)
+
+
 @dataclass
 class CodexStreamedResponse(StreamedResponse):
     """Minimal streamed response wrapper for Codex model provider."""
@@ -273,20 +293,34 @@ class CodexStreamedResponse(StreamedResponse):
     _provider_name: str
     _provider_url: Optional[str]
     _parts: Sequence[Any]
-    _usage_init: InitVar[RequestUsage]
+    _usage_init: InitVar[_Usage]
+    _response_details: Dict[str, Any] = field(default_factory=dict)
     _timestamp: datetime = field(default_factory=_now_utc, init=False)
 
-    def __post_init__(self, _usage_init: RequestUsage) -> None:
+    def __post_init__(self, _usage_init: _Usage) -> None:
         self._usage = _usage_init
 
     async def _get_event_iterator(
         self,
     ) -> AsyncIterator[ModelResponseStreamEvent]:
         for index, part in enumerate(self._parts):
-            yield self._parts_manager.handle_part(
-                vendor_part_id=index,
-                part=part,
-            )
+            if isinstance(part, TextPart):
+                event = self._parts_manager.handle_text_delta(
+                    vendor_part_id=index,
+                    content=part.content,
+                )
+                if event is not None:
+                    yield event
+                continue
+
+            if isinstance(part, ToolCallPart):
+                yield self._parts_manager.handle_tool_call_part(
+                    vendor_part_id=index,
+                    tool_name=part.tool_name,
+                    args=part.args,
+                    tool_call_id=part.tool_call_id,
+                )
+                continue
 
     @property
     def model_name(self) -> str:
@@ -303,6 +337,11 @@ class CodexStreamedResponse(StreamedResponse):
     @property
     def timestamp(self) -> datetime:
         return self._timestamp
+
+    def get(self) -> ModelResponse:
+        response = super().get()
+        _attach_response_details(response, self._response_details)
+        return response
 
 
 class CodexModel(Model):
@@ -360,11 +399,13 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
-        model_settings, model_request_parameters = self.prepare_request(
-            model_settings,
-            model_request_parameters,
-        )
+    ) -> tuple[List[Any], _Usage, str]:
+        prepare_request = getattr(self, "prepare_request", None)
+        if callable(prepare_request):
+            model_settings, model_request_parameters = prepare_request(
+                model_settings,
+                model_request_parameters,
+            )
 
         tool_defs = [
             *model_request_parameters.function_tools,
@@ -418,13 +459,7 @@ class CodexModel(Model):
                 prompt, output_schema=output_schema, turn_options=TurnOptions()
             )
 
-        usage = RequestUsage()
-        if parsed_turn.turn.usage is not None:
-            usage = RequestUsage(
-                input_tokens=parsed_turn.turn.usage.input_tokens,
-                output_tokens=parsed_turn.turn.usage.output_tokens,
-                cache_read_tokens=parsed_turn.turn.usage.cached_input_tokens,
-            )
+        usage = _make_request_usage(parsed_turn.turn.usage)
 
         tool_calls = _tool_calls_from_envelope(parsed_turn.output)
         parts: List[Any] = []
@@ -444,7 +479,7 @@ class CodexModel(Model):
 
         thread_id = thread.id
         assert thread_id is not None
-        return parts, usage, thread_id, model_request_parameters
+        return parts, usage, thread_id
 
     async def request(
         self,
@@ -452,17 +487,16 @@ class CodexModel(Model):
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
-        parts, usage, thread_id, _ = await self._run_codex_request(
+        parts, usage, thread_id = await self._run_codex_request(
             messages,
             model_settings,
             model_request_parameters,
         )
-        return ModelResponse(
+        return _build_model_response(
             parts=parts,
             usage=usage,
             model_name=self.model_name,
-            provider_name="codex",
-            provider_details={"thread_id": thread_id},
+            details={"thread_id": thread_id},
         )
 
     @asynccontextmanager
@@ -471,21 +505,18 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
-        run_context: Optional[RunContext[Any]] = None,
     ) -> AsyncIterator[StreamedResponse]:
-        del run_context
-        parts, usage, thread_id, prepared_params = await self._run_codex_request(
+        parts, usage, thread_id = await self._run_codex_request(
             messages,
             model_settings,
             model_request_parameters,
         )
         streamed = CodexStreamedResponse(
-            model_request_parameters=prepared_params,
             _model_name=self.model_name,
             _provider_name="codex",
             _provider_url=None,
             _parts=parts,
             _usage_init=usage,
+            _response_details={"thread_id": thread_id},
         )
-        streamed.provider_details = {"thread_id": thread_id}
         yield streamed
