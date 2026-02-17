@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.86.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.98.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -53,7 +53,7 @@ uv add codex-sdk-python
 2. Ensure a `codex` binary is available (required for local runs):
 
 ```bash
-# From the repo source (downloads vendor binaries)
+# From the repo source (downloads vendor binaries from the matching npm release)
 python scripts/setup_binary.py
 ```
 
@@ -255,7 +255,7 @@ Important mappings to the Codex CLI:
 - `config_overrides` maps to repeated `--config key=value` entries.
 
 Note: `skills_enabled` is deprecated in Codex 0.80+ (skills are always enabled).
-Note: Codex 0.91.0+ caps `max_threads` to 6.
+Note: Codex defaults `agents.max_threads` to 6; `max_threads` must be `>= 1` if set.
 Note: Codex 0.88.0+ ignores `experimental_instructions_file`; use
 `model_instructions_file` instead.
 
@@ -310,12 +310,14 @@ default prompt) for richer UI integrations.
 
 The SDK also exposes helpers for most app-server endpoints:
 
-- Threads: `thread_list`, `thread_read`, `thread_archive`, `thread_rollback`, `thread_loaded_list`
+- Threads: `thread_start`, `thread_resume`, `thread_fork`, `thread_list`, `thread_loaded_list`,
+  `thread_read`, `thread_archive`, `thread_unarchive`, `thread_name_set`,
+  `thread_compact_start`, `thread_rollback`
 - Config: `config_read`, `config_value_write`, `config_batch_write`, `config_requirements_read`
-- Skills: `skills_list`
+- Skills: `skills_list`, `skills_remote_read`, `skills_remote_write`, `skills_config_write`
 - Turns/review: `turn_start`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`
-- Collaboration modes: `collaboration_mode_list`
+- Collaboration modes: `collaboration_mode_list` (experimental)
 - One-off commands: `command_exec`
 - MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
 - Account: `account_login_start`, `account_login_cancel`, `account_logout`,
@@ -325,7 +327,10 @@ The SDK also exposes helpers for most app-server endpoints:
 These map 1:1 to the Codex app-server protocol; see `codex/codex-rs/app-server/README.md`
 for payload shapes and event semantics.
 
-`thread_list` supports an `archived` filter, and `config_read` accepts an optional `cwd`
+Note: some endpoints and fields are gated behind an experimental capability; set
+`AppServerOptions(experimental_api_enabled=True)` to opt in.
+
+`thread_list` supports `archived`, `sort_key`, and `source_kinds` filters, and `config_read` accepts an optional `cwd`
 to compute the effective layered config for a specific working directory.
 
 ### Observability (OTEL) and notify

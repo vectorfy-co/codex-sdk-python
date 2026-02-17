@@ -151,6 +151,22 @@ async def test_app_server_client_turn_session_requires_turn_id(
 
 
 @pytest.mark.asyncio
+async def test_app_server_client_turn_session_requires_turn_dict(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cover the branch where the app-server response is not a dict."""
+
+    async def fake_turn_start(self, *_args, **_kwargs):
+        return "not-a-dict"
+
+    monkeypatch.setattr(AppServerClient, "turn_start", fake_turn_start)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    with pytest.raises(CodexError):
+        await client.turn_session("thr_1", "hi")
+
+
+@pytest.mark.asyncio
 async def test_app_server_client_turn_session_starts_session(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -292,3 +308,82 @@ def test_turn_session_is_turn_completed_false():
     session = AppServerTurnSession(client, thread_id="thr", turn_id="turn")
     note = AppServerNotification(method="turn/started", params={"turn": {"id": "turn"}})
     assert session._is_turn_completed(note) is False
+
+
+@pytest.mark.asyncio
+async def test_turn_session_drain_breaks_on_none_request_and_queues_unhandled():
+    """Cover request-draining paths and unhandled request queueing."""
+    client = FakeAppServerClient()
+    session = AppServerTurnSession(
+        client,
+        thread_id="thr",
+        turn_id="turn",
+        approvals=ApprovalDecisions(command_execution="accept"),
+    )
+    await session.start()
+
+    # Unknown method should be left unhandled and pushed to the session request queue.
+    await client.requests.put(
+        AppServerRequest(
+            id=1,
+            method="unknown/method",
+            params={"threadId": "thr", "turnId": "turn"},
+        )
+    )
+    # Drain loop should stop immediately when next_request returns None.
+    await client.requests.put(None)
+    await client.notifications.put(
+        AppServerNotification(method="turn/completed", params={"turn": {"id": "turn"}})
+    )
+
+    pending = await session.next_request()
+    assert pending is not None
+    assert pending.method == "unknown/method"
+
+    await session.wait()
+
+
+@pytest.mark.asyncio
+async def test_turn_session_drain_requeues_unhandled_requests() -> None:
+    """Ensure `_drain_pending_requests()` pushes unhandled requests into the request queue."""
+
+    client = FakeAppServerClient()
+    session = AppServerTurnSession(
+        client,
+        thread_id="thr",
+        turn_id="turn",
+        approvals=ApprovalDecisions(command_execution="accept"),
+    )
+
+    # Drive the drain helper directly; this avoids relying on scheduling/races inside
+    # the pump task while still covering the "requeue unhandled request" branch.
+    await client.requests.put(
+        AppServerRequest(
+            id=99,
+            method="unknown/method",
+            params={"threadId": "thr", "turnId": "turn"},
+        )
+    )
+    await client.requests.put(None)
+
+    await session._drain_pending_requests()
+
+    req = await session._requests.get()
+    assert req is not None
+    assert req.id == 99
+    assert req.method == "unknown/method"
+
+
+def test_turn_session_matches_turn_helpers():
+    """Cover turn-matching helper branches for coverage."""
+    client = FakeAppServerClient()
+    session = AppServerTurnSession(client, thread_id="thr", turn_id="turn")
+
+    assert session._matches_turn(None) is True
+    assert session._matches_turn({"threadId": "thr", "turnId": "other"}) is False
+    assert (
+        session._is_turn_completed(
+            AppServerNotification(method="turn/completed", params={})
+        )
+        is False
+    )

@@ -39,6 +39,7 @@ class ToolPlanValidationError(ValueError):
     """Raised for malformed envelope output or invalid tool-call plans."""
 
     def __init__(self, code: str, message: str):
+        """Initialize a validation error with a stable error code."""
         super().__init__(message)
         self.code = code
         self.message = message
@@ -287,6 +288,7 @@ def validate_tool_plan(
 
 
 def _normalize_tool_choice(tool_choice: ToolChoice) -> Tuple[str, Optional[str]]:
+    """Normalize tool choice into a `(mode, function_name)` tuple."""
     if tool_choice is None:
         return "auto", None
 
@@ -328,6 +330,7 @@ def _normalize_tool_choice(tool_choice: ToolChoice) -> Tuple[str, Optional[str]]
 
 
 def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
+    """Validate a value against a subset of JSON Schema used for tool arguments."""
     if not isinstance(schema, Mapping):
         return
 
@@ -394,6 +397,7 @@ def _validate_json_schema(value: Any, schema: Any, *, path: str) -> None:
 
 
 def _validate_any_of(value: Any, branches: Sequence[Any], *, path: str) -> bool:
+    """Return `True` when at least one branch validates without errors."""
     for branch in branches:
         try:
             _validate_json_schema(value, branch, path=path)
@@ -406,6 +410,7 @@ def _validate_any_of(value: Any, branches: Sequence[Any], *, path: str) -> bool:
 def _validate_object_schema(
     value: Any, schema: Mapping[str, Any], *, path: str
 ) -> None:
+    """Validate object constraints (`required`, properties, additionalProperties)."""
     if not isinstance(value, dict):
         raise ToolPlanValidationError(
             "invalid_tool_arguments", f"{path}: expected object."
@@ -447,6 +452,7 @@ def _validate_object_schema(
 
 
 def _validate_array_schema(value: Any, schema: Mapping[str, Any], *, path: str) -> None:
+    """Validate array constraints (`items`, `minItems`, `maxItems`)."""
     if not isinstance(value, list):
         raise ToolPlanValidationError(
             "invalid_tool_arguments", f"{path}: expected array."
@@ -473,6 +479,7 @@ def _validate_array_schema(value: Any, schema: Mapping[str, Any], *, path: str) 
 
 
 def _matches_type(value: Any, schema_type: Any) -> bool:
+    """Return whether a value satisfies a JSON-schema primitive type label."""
     if not isinstance(schema_type, str):
         return False
     if schema_type == "null":
@@ -495,6 +502,7 @@ def _matches_type(value: Any, schema_type: Any) -> bool:
 
 
 def _require_type(value: Any, schema_type: str, *, path: str) -> None:
+    """Raise when a value does not satisfy a required JSON-schema type."""
     if not _matches_type(value, schema_type):
         raise ToolPlanValidationError(
             "invalid_tool_arguments", f"{path}: expected type `{schema_type}`."

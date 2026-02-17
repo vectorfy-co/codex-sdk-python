@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import (
     Any,
     AsyncGenerator,
+    Dict,
     Generic,
     List,
     Literal,
@@ -18,6 +19,7 @@ from typing import (
     TypedDict,
     TypeVar,
     Union,
+    cast,
 )
 
 from .config_overrides import merge_config_overrides
@@ -27,6 +29,7 @@ from .exec import CodexExec, CodexExecArgs, create_output_schema_file
 from .hooks import ThreadHooks, dispatch_event
 from .items import (
     AgentMessageItem,
+    CollabToolCallItem,
     CommandExecutionItem,
     ErrorItem,
     FileChangeItem,
@@ -51,27 +54,54 @@ class Turn:
     usage: Optional[Usage]
 
     def agent_messages(self) -> List[AgentMessageItem]:
+        """Return agent message items recorded during the turn."""
         return [item for item in self.items if item.type == "agent_message"]
 
     def reasoning(self) -> List[ReasoningItem]:
+        """Return reasoning items recorded during the turn."""
         return [item for item in self.items if item.type == "reasoning"]
 
     def commands(self) -> List[CommandExecutionItem]:
+        """Return command execution items recorded during the turn."""
         return [item for item in self.items if item.type == "command_execution"]
 
     def file_changes(self) -> List[FileChangeItem]:
+        """Return file change items recorded during the turn."""
         return [item for item in self.items if item.type == "file_change"]
 
     def mcp_tool_calls(self) -> List[McpToolCallItem]:
+        """
+        Collects MCP tool call items from the turn.
+
+        Returns:
+            List[McpToolCallItem]: Items from this turn whose `type` is `"mcp_tool_call"`.
+        """
         return [item for item in self.items if item.type == "mcp_tool_call"]
 
+    def collab_tool_calls(self) -> List[CollabToolCallItem]:
+        """
+        Collect all items in the turn that represent collaborative tool calls.
+
+        Returns:
+            collab_tool_calls (List[CollabToolCallItem]): List of items whose `type` is "collab_tool_call".
+        """
+        return [item for item in self.items if item.type == "collab_tool_call"]
+
     def web_searches(self) -> List[WebSearchItem]:
+        """
+        Collects all web search items from the turn.
+
+        Returns:
+            List[WebSearchItem]: Web search items present in the turn, in their original order.
+        """
         return [item for item in self.items if item.type == "web_search"]
 
     def todo_lists(self) -> List[TodoListItem]:
+        """Return todo list items recorded during the turn."""
         return [item for item in self.items if item.type == "todo_list"]
 
     def errors(self) -> List[ErrorItem]:
+        """Return error items recorded during the turn."""
         return [item for item in self.items if item.type == "error"]
 
 
@@ -99,11 +129,15 @@ class ParsedTurn(Generic[T]):
 
 
 class TextInput(TypedDict):
+    """Structured input representing a text fragment."""
+
     type: Literal["text"]
     text: str
 
 
 class LocalImageInput(TypedDict):
+    """Structured input representing a local image path attachment."""
+
     type: Literal["local_image"]
     path: str
 
@@ -127,6 +161,14 @@ class Thread:
         thread_options: ThreadOptions,
         thread_id: Optional[str] = None,
     ):
+        """Create a thread wrapper around a Codex execution backend.
+
+        Args:
+            exec: Executor used to spawn and communicate with the Codex CLI.
+            options: Codex client-level options.
+            thread_options: Per-thread defaults (model, sandbox, web search, etc.).
+            thread_id: Optional existing thread id to resume.
+        """
         self._exec = exec
         self._options = options
         self._id = thread_id
@@ -369,9 +411,24 @@ class Thread:
             raise CodexParseError(f"Unknown event type: {event_type}")
 
     def _parse_item(self, data: dict) -> ThreadItem:
-        """Parse a JSON item into the appropriate ThreadItem type."""
+        """
+        Convert a JSON-decoded item dictionary into the appropriate ThreadItem instance.
+
+        Args:
+            data: Parsed JSON object representing an item; must include a "type" field and the
+                fields required for that item type.
+
+        Returns:
+            A concrete `ThreadItem` instance corresponding to the input item's type.
+
+        Raises:
+            CodexParseError: If the item's "type" is not recognized.
+        """
         from .items import (
             AgentMessageItem,
+            CollabAgentState,
+            CollabAgentStatus,
+            CollabToolCallItem,
             CommandExecutionItem,
             ErrorItem,
             FileChangeItem,
@@ -439,8 +496,50 @@ class Thread:
                 result=result,
                 error=error,
             )
+        elif item_type == "collab_tool_call":
+            raw_receiver_ids = data.get("receiver_thread_ids")
+            receiver_thread_ids: List[str] = []
+            if isinstance(raw_receiver_ids, list):
+                receiver_thread_ids = [
+                    str(entry) for entry in raw_receiver_ids if isinstance(entry, str)
+                ]
+
+            raw_agents_states = data.get("agents_states")
+            agents_states: Dict[str, CollabAgentState] = {}
+            if isinstance(raw_agents_states, dict):
+                for key, value in raw_agents_states.items():
+                    if not isinstance(key, str) or not isinstance(value, dict):
+                        continue
+                    status = value.get("status")
+                    if not isinstance(status, str):
+                        continue
+                    message = value.get("message")
+                    agents_states[key] = CollabAgentState(
+                        status=cast(CollabAgentStatus, status),
+                        message=message if isinstance(message, str) else None,
+                    )
+
+            prompt = data.get("prompt")
+            return CollabToolCallItem(
+                id=data["id"],
+                type="collab_tool_call",
+                tool=data["tool"],
+                sender_thread_id=data["sender_thread_id"],
+                receiver_thread_ids=receiver_thread_ids,
+                prompt=prompt if isinstance(prompt, str) else None,
+                agents_states=agents_states,
+                status=data["status"],
+            )
         elif item_type == "web_search":
-            return WebSearchItem(id=data["id"], type="web_search", query=data["query"])
+            query = data.get("query", "")
+            if not isinstance(query, str):
+                query = ""
+            return WebSearchItem(
+                id=data["id"],
+                type="web_search",
+                query=query,
+                action=data.get("action"),
+            )
         elif item_type == "todo_list":
             items = [
                 TodoItem(text=item["text"], completed=item["completed"])
@@ -599,6 +698,7 @@ class Thread:
 
 
 def normalize_input(input: Input) -> tuple[str, List[str]]:
+    """Normalize the supported input types into (prompt, local_image_paths)."""
     if isinstance(input, str):
         return input, []
 

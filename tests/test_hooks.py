@@ -68,3 +68,16 @@ async def test_dispatch_event_calls_hooks():
     assert calls.count(("item", "agent_message")) == 3
     assert calls.count(("item_type", "agent_message")) == 3
     assert ("error", "error") in calls
+
+
+@pytest.mark.asyncio
+async def test_dispatch_event_ignores_unknown_event_types() -> None:
+    """Cover the fallthrough path when the event type doesn't match any branch."""
+
+    class DummyEvent:
+        type = "not-a-real-event"
+
+    seen = []
+    hooks = ThreadHooks(on_event=lambda event: seen.append(event.type))
+    await dispatch_event(hooks, DummyEvent())
+    assert seen == ["not-a-real-event"]

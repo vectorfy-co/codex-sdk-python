@@ -103,6 +103,54 @@ class TestCodex:
         thread = codex.resume_last_thread(codex_home=str(codex_home))
         assert thread.id == thread_uuid
 
+    def test_extract_thread_id_skips_blank_lines_and_breaks_on_non_thread_started(
+        self, tmp_path: Path
+    ) -> None:
+        """Cover rollout parsing edge-cases for coverage and robustness."""
+        from codex_sdk.codex import _extract_thread_id_from_rollout
+
+        thread_uuid = "123e4567-e89b-12d3-a456-426614174000"
+        rollout = tmp_path / f"rollout-{thread_uuid}.jsonl"
+        rollout.write_text(
+            "\n" + json.dumps({"type": "turn.started"}) + "\n",
+            encoding="utf-8",
+        )
+
+        assert _extract_thread_id_from_rollout(rollout) == thread_uuid
+
+    def test_extract_thread_id_falls_back_to_uuid_when_only_blank_lines(
+        self, tmp_path: Path
+    ) -> None:
+        """Cover the path where the rollout file has no parseable JSON lines."""
+        from codex_sdk.codex import _extract_thread_id_from_rollout
+
+        thread_uuid = "123e4567-e89b-12d3-a456-426614174000"
+        rollout = tmp_path / f"rollout-{thread_uuid}.jsonl"
+        rollout.write_text("\n\n", encoding="utf-8")
+
+        assert _extract_thread_id_from_rollout(rollout) == thread_uuid
+
+    def test_extract_thread_id_falls_back_when_thread_started_has_empty_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Cover branch where thread.started exists but thread_id is missing/empty."""
+        from codex_sdk.codex import _extract_thread_id_from_rollout
+
+        thread_uuid = "123e4567-e89b-12d3-a456-426614174000"
+        rollout = tmp_path / f"rollout-{thread_uuid}.jsonl"
+        rollout.write_text(
+            json.dumps({"type": "thread.started", "thread_id": ""}) + "\n",
+            encoding="utf-8",
+        )
+
+        assert _extract_thread_id_from_rollout(rollout) == thread_uuid
+
+    def test_extract_thread_id_returns_none_on_oserror(self, tmp_path: Path) -> None:
+        """Nonexistent rollout paths should return None rather than raising."""
+        from codex_sdk.codex import _extract_thread_id_from_rollout
+
+        assert _extract_thread_id_from_rollout(tmp_path / "missing.jsonl") is None
+
     def test_resume_last_thread_raises_when_missing_sessions(self, tmp_path: Path):
         codex = Codex(CodexOptions(codex_path_override="codex-binary"))
         with pytest.raises(CodexError):
@@ -137,6 +185,24 @@ class TestCodex:
         codex = Codex(CodexOptions(codex_path_override="codex-binary"))
         thread = codex.resume_last_thread()
         assert thread.id == "thread-env"
+
+    def test_resume_last_thread_preserves_passed_thread_options(
+        self, tmp_path: Path
+    ) -> None:
+        codex_home = tmp_path / "codex-home"
+        sessions_root = codex_home / "sessions"
+        sessions_root.mkdir(parents=True)
+        rollout = sessions_root / "rollout-1.jsonl"
+        rollout.write_text(
+            json.dumps({"type": "thread.started", "thread_id": "thread-opt"}) + "\n",
+            encoding="utf-8",
+        )
+
+        codex = Codex(CodexOptions(codex_path_override="codex-binary"))
+        opts = ThreadOptions(model="gpt-4.1")
+        thread = codex.resume_last_thread(options=opts, codex_home=str(codex_home))
+        assert thread.id == "thread-opt"
+        assert thread._thread_options.model == "gpt-4.1"
 
     def test_resume_last_thread_uses_default_home(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

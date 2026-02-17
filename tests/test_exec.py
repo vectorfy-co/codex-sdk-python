@@ -286,6 +286,7 @@ async def test_exec_passes_config_and_repeated_flags(
     instructions_path = tmp_path / "instructions.md"
     args = CodexExecArgs(
         input="hello",
+        thread_id="thread-123",
         model_reasoning_effort="high",
         model_instructions_file=instructions_path,
         model_personality="pragmatic",
@@ -339,6 +340,10 @@ async def test_exec_passes_config_and_repeated_flags(
         cmd_list[i + 1] for i, v in enumerate(cmd_list[:-1]) if v == "--image"
     ]
     assert image_values == ["/tmp/one.png", "/tmp/two.jpg"]
+    # Resume args must come before `--image` flags (upstream 0.98.0+ parsing).
+    resume_index = cmd_list.index("resume")
+    assert cmd_list[resume_index + 1] == "thread-123"
+    assert resume_index < cmd_list.index("--image")
 
 
 @pytest.mark.asyncio
@@ -406,16 +411,24 @@ async def test_exec_omits_optional_feature_flags_when_unset(
 
 
 @pytest.mark.asyncio
-async def test_exec_rejects_max_threads_over_limit(
+async def test_exec_rejects_max_threads_below_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Fail the test if a subprocess is spawned when max_threads is invalid.
+
+        This test helper always raises an AssertionError to ensure no subprocess is created when argument validation should prevent spawning.
+
+        Raises:
+            AssertionError: Always raised with the message "process should not spawn when max_threads is invalid".
+        """
         raise AssertionError("process should not spawn when max_threads is invalid")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
     exec = CodexExec("codex-binary")
-    args = CodexExecArgs(input="hello", max_threads=7)
+    args = CodexExecArgs(input="hello", max_threads=0)
 
     with pytest.raises(CodexError):
         async for _ in exec.run(args):
@@ -506,6 +519,319 @@ def test_find_codex_path_raises_for_unsupported_platform(
     monkeypatch.setattr(exec_module.platform, "system", lambda: "solaris")
     monkeypatch.setattr(exec_module.platform, "machine", lambda: "sparc")
     with pytest.raises(CodexError):
+        exec_obj._find_codex_path()
+
+
+def test_find_codex_path_falls_back_to_path_binary(monkeypatch: pytest.MonkeyPatch):
+    """When the vendored binary is missing, we fall back to resolving from PATH."""
+    import codex_sdk.exec as exec_module
+
+    exec_obj = CodexExec.__new__(CodexExec)
+    monkeypatch.setattr(exec_module.platform, "system", lambda: "linux")
+    monkeypatch.setattr(exec_module.platform, "machine", lambda: "x86_64")
+
+    # Force the vendored binary check to fail.
+    monkeypatch.setattr(exec_module.Path, "exists", lambda _self: False)
+    monkeypatch.setattr(exec_module.shutil, "which", lambda _name: "/usr/bin/codex")
+
+    assert exec_obj._find_codex_path() == "/usr/bin/codex"
+
+
+def test_find_codex_path_raises_when_vendor_and_path_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """If neither vendor nor PATH contain the binary, raise a helpful error."""
+    import codex_sdk.exec as exec_module
+
+    exec_obj = CodexExec.__new__(CodexExec)
+    monkeypatch.setattr(exec_module.platform, "system", lambda: "linux")
+    monkeypatch.setattr(exec_module.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(exec_module.Path, "exists", lambda _self: False)
+    monkeypatch.setattr(exec_module.shutil, "which", lambda _name: None)
+
+    with pytest.raises(CodexError):
+        exec_obj._find_codex_path()
+
+
+@pytest.mark.asyncio
+async def test_exec_rejects_non_bool_feature_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feature override values must be booleans."""
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        raise AssertionError("process should not spawn when overrides are invalid")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", feature_overrides={"remote_models": "yes"})
+
+    with pytest.raises(CodexError):
+        async for _ in exec.run(args):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_exec_web_search_live_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy web_search_enabled maps to live when true."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_spawn(*cmd: Any, **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = list(cmd)
+        return FakeProcess([], [], 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", web_search_enabled=True)
+    async for _ in exec.run(args):
+        pass
+
+    assert 'web_search="live"' in captured["cmd"]
+
+
+@pytest.mark.asyncio
+async def test_exec_web_search_disabled_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy web_search_cached_enabled maps to disabled when false."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_spawn(*cmd: Any, **kwargs: Any) -> FakeProcess:
+        captured["cmd"] = list(cmd)
+        return FakeProcess([], [], 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", web_search_cached_enabled=False)
+    async for _ in exec.run(args):
+        pass
+
+    assert 'web_search="disabled"' in captured["cmd"]
+
+
+@pytest.mark.asyncio
+async def test_exec_abort_timeout_kills_process(monkeypatch: pytest.MonkeyPatch):
+    """If terminating a process times out during abort, we kill it."""
+
+    controller = AbortController()
+    process = FakeProcessSlow()
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcessSlow:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    original_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(awaitable, timeout=None):
+        # Force the terminate->wait to time out to cover kill path.
+        if timeout == 5.0:
+            # Avoid "coroutine was never awaited" warnings when we intentionally
+            # short-circuit wait_for() calls.
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+            raise asyncio.TimeoutError()
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", signal=controller.signal)
+
+    async def drive():
+        async for _ in exec.run(args):
+            pass
+
+    task = asyncio.create_task(drive())
+    await asyncio.sleep(0)
+    controller.abort("stop")
+
+    with pytest.raises(CodexAbortError):
+        await task
+
+    assert process.terminated is True
+    assert process.killed is True
+
+
+@pytest.mark.asyncio
+async def test_exec_finally_timeout_kills_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the process is still running in finally and terminate times out, we kill it."""
+
+    class FakeProcessNoStdinSlow(FakeProcessNoStdin):
+        def __init__(self) -> None:
+            super().__init__()
+            self.terminated = False
+            self.killed = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+            super().terminate()
+
+        def kill(self) -> None:
+            self.killed = True
+            super().kill()
+
+    process = FakeProcessNoStdinSlow()
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcessNoStdin:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    original_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(awaitable, timeout=None):
+        if timeout == 5.0:
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+            raise asyncio.TimeoutError()
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello")
+
+    with pytest.raises(CodexError, match="did not expose stdin"):
+        async for _ in exec.run(args):
+            pass
+
+    assert process.terminated is True
+    assert process.killed is True
+
+
+@pytest.mark.asyncio
+async def test_exec_skips_stderr_drain_when_stderr_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover branches where stderr is absent and stderr_task remains unset."""
+
+    process = FakeProcess([], [], 0)
+    process.stderr = None
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello")
+    async for _ in exec.run(args):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_exec_abort_when_process_already_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover watch_abort branch where process.returncode is already set."""
+
+    controller = AbortController()
+    stdout = FakeBlockingStream()
+
+    class FakeProcessExited(FakeProcess):
+        def __init__(self) -> None:
+            super().__init__([], [], 0)
+            self.stdout = stdout
+            self.returncode = 0
+
+        async def wait(self) -> int:
+            return 0
+
+    process = FakeProcessExited()
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcessExited:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    exec = CodexExec("codex-binary")
+    args = CodexExecArgs(input="hello", signal=controller.signal)
+
+    async def drive() -> None:
+        async for _ in exec.run(args):
+            pass
+
+    task = asyncio.create_task(drive())
+    await asyncio.sleep(0)
+    controller.abort("stop")
+    stdout._event.set()
+
+    with pytest.raises(CodexAbortError):
+        await task
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "triple", "binary_name"),
+    [
+        ("Linux", "x86_64", "x86_64-unknown-linux-musl", "codex"),
+        ("Linux", "aarch64", "aarch64-unknown-linux-musl", "codex"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin", "codex"),
+        ("Darwin", "arm64", "aarch64-apple-darwin", "codex"),
+        ("Windows", "amd64", "x86_64-pc-windows-msvc", "codex.exe"),
+        ("Windows", "arm64", "aarch64-pc-windows-msvc", "codex.exe"),
+    ],
+)
+def test_find_codex_path_vendor_triples(
+    monkeypatch: pytest.MonkeyPatch,
+    system: str,
+    machine: str,
+    triple: str,
+    binary_name: str,
+) -> None:
+    """Ensure cross-platform vendor binary path selection covers all branches."""
+
+    import codex_sdk.exec as exec_module
+
+    monkeypatch.setattr(exec_module.platform, "system", lambda: system)
+    monkeypatch.setattr(exec_module.platform, "machine", lambda: machine)
+    monkeypatch.setattr(exec_module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(exec_module.Path, "exists", lambda _self: True)
+
+    exec_obj = CodexExec.__new__(CodexExec)
+    path = exec_obj._find_codex_path()
+
+    assert triple in path
+    assert path.endswith(f"/codex/{binary_name}")
+
+
+def test_find_codex_path_unsupported_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    import codex_sdk.exec as exec_module
+
+    monkeypatch.setattr(exec_module.platform, "system", lambda: "Solaris")
+    monkeypatch.setattr(exec_module.platform, "machine", lambda: "sparc")
+
+    exec_obj = CodexExec.__new__(CodexExec)
+    with pytest.raises(CodexError, match="Unsupported platform"):
+        exec_obj._find_codex_path()
+
+
+@pytest.mark.parametrize(
+    ("system", "machine"),
+    [
+        ("Linux", "ppc64"),
+        ("Darwin", "ppc64"),
+        ("Windows", "mips"),
+    ],
+)
+def test_find_codex_path_supported_system_unsupported_machine(
+    monkeypatch: pytest.MonkeyPatch, system: str, machine: str
+) -> None:
+    """Cover fallthrough when OS is known but the CPU architecture is not."""
+    import codex_sdk.exec as exec_module
+
+    monkeypatch.setattr(exec_module.platform, "system", lambda: system)
+    monkeypatch.setattr(exec_module.platform, "machine", lambda: machine)
+
+    exec_obj = CodexExec.__new__(CodexExec)
+    with pytest.raises(CodexError, match="Unsupported platform"):
         exec_obj._find_codex_path()
 
 

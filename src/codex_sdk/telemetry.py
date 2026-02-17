@@ -7,6 +7,7 @@ from typing import Any, Iterator, Optional
 
 
 def _maybe_logfire() -> Optional[Any]:
+    """Return the logfire module if it is importable and configured, else None."""
     try:
         import logfire
     except ImportError:
@@ -27,6 +28,7 @@ def _maybe_logfire() -> Optional[Any]:
 
 @contextmanager
 def span(name: str, **attributes: Any) -> Iterator[None]:
+    """Create an optional Logfire span if Logfire is configured."""
     logfire = _maybe_logfire()
     if logfire is None:
         yield

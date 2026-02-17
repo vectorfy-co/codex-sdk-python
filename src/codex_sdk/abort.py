@@ -18,13 +18,16 @@ class AbortSignal:
 
     @property
     def aborted(self) -> bool:
+        """Return True if the signal has been aborted."""
         return self._event.is_set()
 
     @property
     def reason(self) -> Optional[AbortReason]:
+        """Return the abort reason if provided."""
         return self._reason
 
     async def wait(self) -> None:
+        """Wait until the signal is aborted."""
         await self._event.wait()
 
 
@@ -32,9 +35,15 @@ class AbortController:
     """Controller used to trigger cancellation for an AbortSignal."""
 
     def __init__(self) -> None:
+        """Create a controller with a fresh AbortSignal."""
         self._event = asyncio.Event()
         self.signal = AbortSignal(self._event)
 
     def abort(self, reason: Optional[AbortReason] = None) -> None:
+        """Abort the signal and optionally attach a reason.
+
+        Args:
+            reason: Optional abort reason to surface to callers.
+        """
         self.signal._reason = reason
         self._event.set()

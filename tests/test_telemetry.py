@@ -35,6 +35,21 @@ def test_maybe_logfire_returns_none_when_config_missing(
     assert telemetry._maybe_logfire() is None
 
 
+def test_maybe_logfire_returns_none_when_uninitialized(monkeypatch: pytest.MonkeyPatch):
+    """If Logfire is importable but not configured, instrumentation remains disabled."""
+
+    class FakeConfig:
+        _initialized = False
+
+    class FakeInstance:
+        config = FakeConfig()
+
+    fake_logfire = ModuleType("logfire")
+    fake_logfire.DEFAULT_LOGFIRE_INSTANCE = FakeInstance()
+    monkeypatch.setitem(sys.modules, "logfire", fake_logfire)
+    assert telemetry._maybe_logfire() is None
+
+
 def test_maybe_logfire_returns_none_on_exception(monkeypatch: pytest.MonkeyPatch):
     class BrokenInstance:
         @property
