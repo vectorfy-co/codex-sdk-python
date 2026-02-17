@@ -7,9 +7,12 @@ host-managed tool loops.
 from __future__ import annotations
 
 import json
+import logging
 from base64 import b64encode
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Dict, Literal, Mapping, Optional, Sequence, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,9 +56,8 @@ def jsonable(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
 
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        return model_dump(mode="json")
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return value.model_dump(mode="json")
 
     if isinstance(value, bytes):
         return {"type": "bytes", "base64": b64encode(value).decode("ascii")}
@@ -78,8 +80,12 @@ def json_dumps(value: Any) -> str:
             separators=(",", ":"),
             sort_keys=True,
         )
-    except TypeError:
-        return str(value)
+    except TypeError as exc:
+        logger.error(
+            "Failed to serialize value to JSON",
+            extra={"value_type": type(value).__name__, "error": str(exc)},
+        )
+        raise
 
 
 def build_envelope_schema(tool_names: Sequence[str]) -> Dict[str, Any]:
