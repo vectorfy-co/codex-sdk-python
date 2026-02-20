@@ -796,6 +796,14 @@ class AppServerClient:
         """
         payload: Dict[str, Any] = {}
         if params is not None:
+            _validate_alias_conflicts(
+                params,
+                (
+                    ("hazelnut_scope", "hazelnutScope"),
+                    ("product_surface", "productSurface"),
+                ),
+                context="SkillsRemoteReadRequest",
+            )
             payload.update(dict(params))
         if cwds is not None:
             payload["cwds"] = [str(path) for path in cwds]
@@ -827,6 +835,14 @@ class AppServerClient:
         """
         payload: Dict[str, Any] = {}
         if params is not None:
+            _validate_alias_conflicts(
+                params,
+                (
+                    ("hazelnut_id", "hazelnutId"),
+                    ("is_preload", "isPreload"),
+                ),
+                context="SkillsRemoteWriteRequest",
+            )
             payload.update(dict(params))
         if hazelnut_id is not None:
             payload["hazelnut_id"] = hazelnut_id
@@ -1440,6 +1456,21 @@ def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
             key = _snake_to_camel(key)
         coerced[key] = value
     return coerced
+
+
+def _validate_alias_conflicts(
+    params: Mapping[str, Any],
+    alias_pairs: Sequence[tuple[str, str]],
+    *,
+    context: str,
+) -> None:
+    """Reject payloads that provide both snake_case and camelCase aliases."""
+    for snake_case_key, camel_case_key in alias_pairs:
+        if snake_case_key in params and camel_case_key in params:
+            raise CodexError(
+                f"{context} received both '{snake_case_key}' and "
+                f"'{camel_case_key}'. Provide only one key variant."
+            )
 
 
 def _snake_to_camel(value: str) -> str:

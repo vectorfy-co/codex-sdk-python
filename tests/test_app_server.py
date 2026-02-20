@@ -15,6 +15,7 @@ from codex_sdk.app_server import (
     _extract_turn,
     _iter_lines,
     _normalize_decision,
+    _validate_alias_conflicts,
     normalize_app_server_input,
 )
 from codex_sdk.exceptions import CodexAppServerError, CodexError
@@ -457,6 +458,16 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "skills/config/write", {"ok": True})
     assert payload["params"] == {"mode": "manual"}
 
+    with pytest.raises(CodexError, match="SkillsRemoteReadRequest"):
+        await client.skills_remote_read(
+            params={"hazelnut_scope": "user", "hazelnutScope": "workspace"}
+        )
+
+    with pytest.raises(CodexError, match="SkillsRemoteWriteRequest"):
+        await client.skills_remote_write(
+            params={"hazelnut_id": "hz_1", "hazelnutId": "hz_2"}
+        )
+
     task = asyncio.create_task(
         client.skills_remote_read(
             cwds=[tmp_path],
@@ -794,6 +805,28 @@ def test_app_server_decision_helpers() -> None:
         _normalize_decision(123, None)  # type: ignore[arg-type]
     with pytest.raises(CodexError):
         _normalize_decision("accept_with_execpolicy_amendment", None)
+
+
+def test_app_server_alias_conflict_validation() -> None:
+    _validate_alias_conflicts(
+        {"hazelnut_scope": "user"},
+        (("hazelnut_scope", "hazelnutScope"),),
+        context="SkillsRemoteReadRequest",
+    )
+
+    with pytest.raises(CodexError, match="SkillsRemoteReadRequest"):
+        _validate_alias_conflicts(
+            {"hazelnut_scope": "user", "hazelnutScope": "workspace"},
+            (("hazelnut_scope", "hazelnutScope"),),
+            context="SkillsRemoteReadRequest",
+        )
+
+    with pytest.raises(CodexError, match="SkillsRemoteWriteRequest"):
+        _validate_alias_conflicts(
+            {"hazelnut_id": "h1", "hazelnutId": "h2"},
+            (("hazelnut_id", "hazelnutId"),),
+            context="SkillsRemoteWriteRequest",
+        )
 
 
 @pytest.mark.asyncio

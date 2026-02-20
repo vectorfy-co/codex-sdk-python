@@ -15,6 +15,8 @@ from .app_server import (
     AppServerRequest,
     AppServerTurnSession,
     AppServerUserInput,
+    SkillsRemoteReadRequest,
+    SkillsRemoteWriteRequest,
 )
 from .codex import Codex
 from .events import (
@@ -92,6 +94,8 @@ __all__ = [
     "ApprovalDecisions",
     "AppServerInput",
     "AppServerUserInput",
+    "SkillsRemoteReadRequest",
+    "SkillsRemoteWriteRequest",
     "Thread",
     "ThreadHooks",
     "Input",

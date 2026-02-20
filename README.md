@@ -330,8 +330,21 @@ for payload shapes and event semantics.
 Note: some endpoints and fields are gated behind an experimental capability; set
 `AppServerOptions(experimental_api_enabled=True)` to opt in.
 
-`thread_list` supports `archived`, `sort_key`, and `source_kinds` filters, and `config_read` accepts an optional `cwd`
-to compute the effective layered config for a specific working directory.
+`thread_list` supports `archived`, `sort_key`, and `source_kinds` filters (unchanged), and now also accepts `cwd`
+for scoped thread queries. `config_read` accepts an optional `cwd` to compute effective layered config for a specific
+working directory.
+
+`skills_remote_read` supports `cwds`, `enabled`, `hazelnut_scope`, and `product_surface` filters. `model_list` accepts
+an optional `include_hidden` flag.
+
+```python
+threads = await app.thread_list(archived=False, sort_key="updatedAt", source_kinds=["local"], cwd=".")
+config = await app.config_read(include_layers=True, cwd=".")
+skills = await app.skills_remote_read(
+    cwds=["."], enabled=True, hazelnut_scope="user", product_surface="codex_desktop"
+)
+models = await app.model_list(limit=20, include_hidden=False)
+```
 
 ### Observability (OTEL) and notify
 

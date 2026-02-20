@@ -18,6 +18,8 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
   README release badge).
 - App-server method coverage aligned with upstream `rust-v0.104.0` schema additions
   (including thread list/model list/remote skills parameters).
+- Existing `thread_list` filters (`archived`, `sort_key`, `source_kinds`) remain
+  unchanged while adding `cwd`.
 
 ### Notes
 - Upstream `rust-v0.104.0` introduces thread archived/unarchived notifications and
