@@ -2,6 +2,30 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.104.0] - 2026-02-18
+
+### Added
+- `AppServerClient.thread_list(...)` now accepts `cwd` for scoped thread queries.
+- `AppServerClient.model_list(...)` now accepts `include_hidden` to request hidden models.
+- `AppServerClient.skills_remote_read(...)` now supports explicit `cwds`, `enabled`,
+  `hazelnut_scope`, and `product_surface` filters and adds typed request helpers.
+- `skills/remote/write` typed payload helper to keep optional legacy
+  `is_preload` compatibility while supporting current protocol usage.
+
+### Updated
+- Bundled Codex CLI vendor binaries updated to `0.104.0` via `scripts/setup_binary.py`.
+- SDK package version bumped to `0.104.0` (`pyproject.toml`, `codex_sdk.__version__`,
+  README release badge).
+- App-server method coverage aligned with upstream `rust-v0.104.0` schema additions
+  (including thread list/model list/remote skills parameters).
+- Existing `thread_list` filters (`archived`, `sort_key`, `source_kinds`) remain
+  unchanged while adding `cwd`.
+
+### Notes
+- Upstream `rust-v0.104.0` introduces thread archived/unarchived notifications and
+  command approval IDs; the SDK remains compatible because app-server notifications
+  and approval payloads are passed through as structured dictionaries.
+
 ## [0.101.0] - 2026-02-15
 
 ### Added

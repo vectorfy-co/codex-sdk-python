@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.101.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.101.0 badge" />
+        <img src="https://img.shields.io/badge/Release-0.104.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.104.0 badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -330,8 +330,21 @@ for payload shapes and event semantics.
 Note: some endpoints and fields are gated behind an experimental capability; set
 `AppServerOptions(experimental_api_enabled=True)` to opt in.
 
-`thread_list` supports `archived`, `sort_key`, and `source_kinds` filters, and `config_read` accepts an optional `cwd`
-to compute the effective layered config for a specific working directory.
+`thread_list` supports `archived`, `sort_key`, and `source_kinds` filters (unchanged), and now also accepts `cwd`
+for scoped thread queries. `config_read` accepts an optional `cwd` to compute effective layered config for a specific
+working directory.
+
+`skills_remote_read` supports `cwds`, `enabled`, `hazelnut_scope`, and `product_surface` filters. `model_list` accepts
+an optional `include_hidden` flag.
+
+```python
+threads = await app.thread_list(archived=False, sort_key="updatedAt", source_kinds=["local"], cwd=".")
+config = await app.config_read(include_layers=True, cwd=".")
+skills = await app.skills_remote_read(
+    cwds=["."], enabled=True, hazelnut_scope="user", product_surface="codex_desktop"
+)
+models = await app.model_list(limit=20, include_hidden=False)
+```
 
 ### Observability (OTEL) and notify
 

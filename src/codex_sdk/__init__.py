@@ -15,6 +15,8 @@ from .app_server import (
     AppServerRequest,
     AppServerTurnSession,
     AppServerUserInput,
+    SkillsRemoteReadRequest,
+    SkillsRemoteWriteRequest,
 )
 from .codex import Codex
 from .events import (
@@ -77,7 +79,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.101.0"
+__version__ = "0.104.0"
 
 __all__ = [
     "AbortController",
@@ -92,6 +94,8 @@ __all__ = [
     "ApprovalDecisions",
     "AppServerInput",
     "AppServerUserInput",
+    "SkillsRemoteReadRequest",
+    "SkillsRemoteWriteRequest",
     "Thread",
     "ThreadHooks",
     "Input",
