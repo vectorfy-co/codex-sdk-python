@@ -680,7 +680,7 @@ wheels = [
 
 [[package]]
 name = "codex-sdk-python"
-version = "0.101.0"
+version = "0.104.0"
 source = { editable = "." }
 
 [package.optional-dependencies]

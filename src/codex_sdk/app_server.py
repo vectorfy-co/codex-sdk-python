@@ -558,6 +558,7 @@ class AppServerClient:
         model_providers: Optional[Sequence[str]] = None,
         source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
+        cwd: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
@@ -570,6 +571,7 @@ class AppServerClient:
             source_kinds: Filter threads by one or more source kinds.
             archived: If set, restrict results to archived (`True`) or unarchived (`False`)
                 threads.
+            cwd: Optional working directory scope for server-side filtering.
 
         Returns:
             The raw response dictionary returned by the app-server for the `thread/list`
@@ -588,6 +590,8 @@ class AppServerClient:
             params["source_kinds"] = list(source_kinds)
         if archived is not None:
             params["archived"] = archived
+        if cwd is not None:
+            params["cwd"] = str(cwd)
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
 
     async def thread_read(
@@ -769,26 +773,46 @@ class AppServerClient:
         return await self._request_dict("skills/list", _coerce_keys(payload))
 
     async def skills_remote_read(
-        self, *, params: Optional[Mapping[str, Any]] = None
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        enabled: Optional[bool] = None,
+        hazelnut_scope: Optional[str] = None,
+        product_surface: Optional[str] = None,
+        params: Optional["SkillsRemoteReadRequest"] = None,
     ) -> Dict[str, Any]:
         """
         Read remote skills metadata from the app server.
 
         Args:
-            params: Optional request payload.
+            cwds: Optional workspace roots to scope the remote skill listing.
+            enabled: Optional filter for enabled/disabled remote skills.
+            hazelnut_scope: Optional Hazelnut scope identifier.
+            product_surface: Optional product surface identifier.
+            params: Optional raw request payload for protocol-forward fields.
 
         Returns:
             result (Dict[str, Any]): The app-server response payload for the `skills/remote/read` request.
         """
-        payload = _coerce_keys(dict(params)) if params is not None else {}
-        return await self._request_dict("skills/remote/read", payload)
+        payload: Dict[str, Any] = {}
+        if params is not None:
+            payload.update(dict(params))
+        if cwds is not None:
+            payload["cwds"] = [str(path) for path in cwds]
+        if enabled is not None:
+            payload["enabled"] = enabled
+        if hazelnut_scope is not None:
+            payload["hazelnut_scope"] = hazelnut_scope
+        if product_surface is not None:
+            payload["product_surface"] = product_surface
+        return await self._request_dict("skills/remote/read", _coerce_keys(payload))
 
     async def skills_remote_write(
         self,
         *,
         hazelnut_id: Optional[str] = None,
         is_preload: Optional[bool] = None,
-        params: Optional[Mapping[str, Any]] = None,
+        params: Optional["SkillsRemoteWriteRequest"] = None,
     ) -> Dict[str, Any]:
         """
         Start a remote skill write operation.
@@ -803,12 +827,12 @@ class AppServerClient:
         """
         payload: Dict[str, Any] = {}
         if params is not None:
-            payload.update(_coerce_keys(dict(params)))
+            payload.update(dict(params))
         if hazelnut_id is not None:
             payload["hazelnut_id"] = hazelnut_id
         if is_preload is not None:
             payload["is_preload"] = is_preload
-        return await self._request_dict("skills/remote/write", payload)
+        return await self._request_dict("skills/remote/write", _coerce_keys(payload))
 
     async def skills_config_write(
         self,
@@ -924,7 +948,11 @@ class AppServerClient:
         return await self._request_dict("turn/steer", _coerce_keys(payload))
 
     async def model_list(
-        self, *, cursor: Optional[str] = None, limit: Optional[int] = None
+        self,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        include_hidden: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """List models available to the app-server."""
         params: Dict[str, Any] = {}
@@ -932,7 +960,9 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return await self._request_dict("model/list", params or None)
+        if include_hidden is not None:
+            params["include_hidden"] = include_hidden
+        return await self._request_dict("model/list", _coerce_keys(params) or None)
 
     async def app_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
@@ -1307,6 +1337,26 @@ class SkillsConfigWriteRequest(TypedDict, total=False):
     path: str
     enabled: bool
     mode: str
+
+
+class SkillsRemoteReadRequest(TypedDict, total=False):
+    """Typed payload for `skills/remote/read` requests."""
+
+    cwds: List[str]
+    enabled: bool
+    hazelnut_scope: str
+    hazelnutScope: str
+    product_surface: str
+    productSurface: str
+
+
+class SkillsRemoteWriteRequest(TypedDict, total=False):
+    """Typed payload for `skills/remote/write` requests."""
+
+    hazelnut_id: str
+    hazelnutId: str
+    is_preload: bool
+    isPreload: bool
 
 
 class ItemToolCallRequest(TypedDict, total=False):

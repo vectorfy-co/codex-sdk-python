@@ -289,7 +289,11 @@ async def test_app_server_methods_and_input_normalization(
 
     task = asyncio.create_task(
         client.thread_list(
-            cursor="c2", limit=2, model_providers=["openai"], archived=True
+            cursor="c2",
+            limit=2,
+            model_providers=["openai"],
+            archived=True,
+            cwd=tmp_path,
         )
     )
     _, payload = await expect_request(
@@ -297,6 +301,7 @@ async def test_app_server_methods_and_input_normalization(
     )
     assert payload["params"]["modelProviders"] == ["openai"]
     assert payload["params"]["archived"] is True
+    assert payload["params"]["cwd"] == str(tmp_path)
 
     task = asyncio.create_task(client.thread_read("t1", include_turns=True))
     _, payload = await expect_request(task, "thread/read", {"thread": {"id": "t1"}})
@@ -374,9 +379,11 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "review/start", {"turn": {"id": "turn_r"}})
     assert payload["params"]["threadId"] == "t1"
 
-    task = asyncio.create_task(client.model_list(cursor="m", limit=1))
+    task = asyncio.create_task(
+        client.model_list(cursor="m", limit=1, include_hidden=True)
+    )
     _, payload = await expect_request(task, "model/list", {"data": []})
-    assert payload["params"] == {"cursor": "m", "limit": 1}
+    assert payload["params"] == {"cursor": "m", "limit": 1, "includeHidden": True}
 
     task = asyncio.create_task(client.app_list(cursor="a", limit=2))
     _, payload = await expect_request(task, "app/list", {"data": []})
@@ -451,16 +458,28 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"] == {"mode": "manual"}
 
     task = asyncio.create_task(
-        client.skills_remote_read(params={"cwds": [str(tmp_path)]})
+        client.skills_remote_read(
+            cwds=[tmp_path],
+            enabled=True,
+            hazelnut_scope="user",
+            product_surface="codex_desktop",
+        )
     )
     _, payload = await expect_request(task, "skills/remote/read", {"data": []})
-    assert payload["params"] == {"cwds": [str(tmp_path)]}
+    assert payload["params"] == {
+        "cwds": [str(tmp_path)],
+        "enabled": True,
+        "hazelnutScope": "user",
+        "productSurface": "codex_desktop",
+    }
 
     task = asyncio.create_task(
-        client.skills_remote_write(params={"skills": [{"name": "s"}]})
+        client.skills_remote_write(
+            hazelnut_id="hz_1", params={"skills": [{"name": "s"}]}
+        )
     )
     _, payload = await expect_request(task, "skills/remote/write", {"ok": True})
-    assert payload["params"] == {"skills": [{"name": "s"}]}
+    assert payload["params"] == {"skills": [{"name": "s"}], "hazelnutId": "hz_1"}
 
     task = asyncio.create_task(client.item_tool_call(params={"name": "tool_a"}))
     _, payload = await expect_request(task, "item/tool/call", {"ok": True})
