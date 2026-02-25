@@ -2,6 +2,22 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.104.1] - 2026-02-25
+
+### Fixed
+- Fix pydantic-ai `request_stream` compatibility by accepting optional `run_context`
+  in `CodexModel.request_stream(...)`.
+- Add `CodexStreamedResponse.provider_url` for newer pydantic-ai stream interfaces.
+
+### Added
+- Reproduction harness examples for `Agent.run_stream(...)` and `Agent.run(...)`
+  with `CodexModel` to quickly verify streaming and non-stream integration paths.
+
+### Notes
+- Tested pydantic-ai-slim versions: `0.8.1` (repo baseline), `1.56.0`, and `1.63.0`.
+- Compatibility boundary verified from published wheels: `run_context` is introduced
+  in stream contracts starting at `pydantic-ai-slim 0.7.0`.
+
 ## [0.104.0] - 2026-02-18
 
 ### Added

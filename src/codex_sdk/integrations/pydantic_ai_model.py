@@ -392,6 +392,11 @@ class CodexStreamedResponse(StreamedResponse):
         return self._provider_name
 
     @property
+    def provider_url(self) -> Optional[str]:
+        """Return the provider URL when available (Codex currently does not expose one)."""
+        return None
+
+    @property
     def timestamp(self) -> datetime:
         """
         Get the UTC timestamp when this response was created.
@@ -627,6 +632,7 @@ class CodexModel(Model):
         messages: list[ModelMessage],
         model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
+        run_context: Optional[Any] = None,
     ) -> AsyncIterator[StreamedResponse]:
         """
         Produce an asynchronous stream that yields a Codex-backed streamed model response for the given message sequence.
@@ -635,6 +641,8 @@ class CodexModel(Model):
             messages: Conversation messages to send to the model.
             model_settings: Model-specific settings (may be None).
             model_request_parameters: Additional request parameters controlling the model call.
+            run_context: Optional PydanticAI run context. Accepted for compatibility
+                with PydanticAI stream-call contracts and currently unused by Codex.
 
         Returns:
             An async iterator that yields a single StreamedResponse (CodexStreamedResponse) containing the model name, response parts, usage information, and the Codex thread identifier.
