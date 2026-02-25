@@ -1,5 +1,6 @@
 import dataclasses
 import importlib
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -27,8 +28,10 @@ from codex_sdk.thread import ParsedTurn, Turn
 
 messages = importlib.import_module("pydantic_ai.messages")
 models = importlib.import_module("pydantic_ai.models")
+pydantic_ai = importlib.import_module("pydantic_ai")
 tools = importlib.import_module("pydantic_ai.tools")
 
+Agent = pydantic_ai.Agent
 BuiltinToolCallPart = messages.BuiltinToolCallPart
 ModelRequest = messages.ModelRequest
 ModelResponse = messages.ModelResponse
@@ -523,6 +526,62 @@ async def test_codex_model_request_stream_yields_response():
     assert response.provider_details == {"thread_id": "thread-123"}
 
 
+@pytest.mark.asyncio
+async def test_codex_model_request_stream_accepts_run_context_argument():
+    output = {"tool_calls": [], "final": "hello"}
+    thread = FakeThread(output)
+    codex = FakeCodex(thread)
+    model = CodexModel(codex=codex)
+
+    messages = [ModelRequest(parts=[UserPromptPart("hi")])]
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    async with model.request_stream(messages, None, params, object()) as streamed:
+        _ = [event async for event in streamed]
+        response = streamed.get()
+
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_stream_passes_run_context_to_codex_model():
+    class CapturingCodexModel(CodexModel):
+        def __init__(self, *, codex):
+            super().__init__(codex=codex)
+            self.last_run_context = None
+
+        @asynccontextmanager
+        async def request_stream(
+            self,
+            messages,
+            model_settings,
+            model_request_parameters,
+            run_context=None,
+        ):
+            self.last_run_context = run_context
+            async with super().request_stream(
+                messages,
+                model_settings,
+                model_request_parameters,
+                run_context,
+            ) as streamed:
+                yield streamed
+
+    output = {"tool_calls": [], "final": "hello"}
+    thread = FakeThread(output)
+    codex = FakeCodex(thread)
+    model = CapturingCodexModel(codex=codex)
+    agent = Agent(model=model, output_type=str)
+
+    async with agent.run_stream("hi") as result:
+        streamed_output = await result.get_output()
+
+    assert streamed_output == "hello"
+    assert model.last_run_context is not None
+
+
 def test_codex_model_can_construct_codex_from_options():
     CodexModel(codex_options=CodexOptions(codex_path_override="codex-binary"))
 
@@ -547,3 +606,4 @@ async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
     )
     events = [event async for event in resp]
     assert events
+    assert resp.provider_url is None
