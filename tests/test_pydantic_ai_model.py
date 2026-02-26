@@ -11,20 +11,29 @@ pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
 
-from codex_sdk.app_server import AppServerNotification
+from codex_sdk.app_server import AppServerNotification, AppServerOptions
 from codex_sdk.events import Usage
+from codex_sdk.exceptions import CodexError, TurnFailedError
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
     CodexStreamedResponse,
     _build_envelope_schema,
+    _extract_json_object,
+    _extract_turn_failure_message,
+    _extract_turn_text,
+    _extract_usage_from_turn,
     _final_from_envelope,
+    _is_envelope_candidate,
     _json_dumps,
     _jsonable,
+    _notification_items,
     _render_message_history,
     _render_tool_definitions,
+    _to_int,
     _tool_calls_from_envelope,
+    _usage_from_mapping,
 )
-from codex_sdk.options import CodexOptions
+from codex_sdk.options import CodexOptions, ThreadOptions
 from codex_sdk.thread import ParsedTurn, Turn
 
 messages = importlib.import_module("pydantic_ai.messages")
@@ -778,3 +787,260 @@ async def test_codex_model_always_reuse_mode_reuses_on_equal_history_length():
 
     assert len(app.thread_start_calls) == 1
     assert len(app.turn_session_calls) == 2
+
+
+def test_app_server_helpers_handle_edge_cases():
+    assert _extract_json_object('{"tool_calls":[],"final":"ok"}') == {
+        "tool_calls": [],
+        "final": "ok",
+    }
+    assert _extract_json_object('prefix {"tool_calls":[],"final":"ok"} suffix') == {
+        "tool_calls": [],
+        "final": "ok",
+    }
+    assert _extract_json_object("not-json") is None
+
+    assert _is_envelope_candidate({"tool_calls": []})
+    assert _is_envelope_candidate({"final": ""})
+    assert not _is_envelope_candidate([])
+
+    assert _to_int(None) == 0
+    assert _to_int("3") == 3
+    assert _to_int("not-an-int") == 0
+
+    usage = _usage_from_mapping({"input_tokens": "2", "outputTokens": 4})
+    assert usage is not None
+    assert usage.input_tokens == 2
+    assert usage.output_tokens == 4
+    assert usage.cache_read_tokens == 0
+
+    usage_from_turn = _extract_usage_from_turn({"tokenUsage": {"inputTokens": 1}})
+    assert usage_from_turn is not None
+    assert usage_from_turn.input_tokens == 1
+
+    assert _extract_turn_text({"output": {"final": "done"}}) == "done"
+    assert (
+        _extract_turn_text(
+            {"items": [{"type": "agentMessage", "content": "from-agent-message"}]}
+        )
+        == "from-agent-message"
+    )
+    assert _extract_turn_text(None) == ""
+
+    notification = AppServerNotification(
+        method="item/updated",
+        params={
+            "item": {"id": "a", "type": "agent_message", "text": "x"},
+            "items": [{"id": "b", "type": "agent_message", "text": "y"}],
+            "turn": {
+                "item": {"id": "c", "type": "agent_message", "text": "z"},
+                "items": [{"id": "d", "type": "agent_message", "text": "w"}],
+            },
+        },
+    )
+    assert [item["id"] for item in _notification_items(notification)] == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
+
+    failure = AppServerNotification(
+        method="turn/failed",
+        params={"error": {"message": "boom"}},
+    )
+    assert _extract_turn_failure_message(failure) == "boom"
+
+    fallback_failure = AppServerNotification(method="turn/failed", params={})
+    assert _extract_turn_failure_message(fallback_failure) == "Turn failed"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_stream_falls_back_to_final_turn_text():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-fallback",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "hello-from-final-turn",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        events = [event async for event in streamed]
+        response = streamed.get()
+
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello-from-final-turn"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_stream_raises_turn_failed_error():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="turn/failed",
+                params={"error": {"message": "approval denied"}},
+            )
+        ],
+        final_turn={
+            "id": "turn-failed",
+            "usage": {"inputTokens": 1, "outputTokens": 0},
+            "finalResponse": "",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    with pytest.raises(TurnFailedError, match="approval denied"):
+        async with model.request_stream(
+            [ModelRequest(parts=[UserPromptPart("fail")])], None, params
+        ) as streamed:
+            _ = [event async for event in streamed]
+
+
+@pytest.mark.asyncio
+async def test_codex_model_close_closes_owned_app_server(monkeypatch):
+    created = []
+
+    class OwnedFakeAppServer(FakeAppServerClient):
+        def __init__(self, options):
+            super().__init__(
+                notifications=[],
+                final_turn={
+                    "id": "turn-owned",
+                    "usage": {"inputTokens": 1, "outputTokens": 1},
+                    "finalResponse": "ok",
+                },
+            )
+            self.options = options
+            created.append(self)
+
+    module = importlib.import_module("codex_sdk.integrations.pydantic_ai_model")
+    monkeypatch.setattr(module, "AppServerClient", OwnedFakeAppServer)
+
+    model = CodexModel(app_server_options=AppServerOptions())
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    await model.request([ModelRequest(parts=[UserPromptPart("hi")])], None, params)
+
+    assert created and created[0].start_calls >= 1
+
+    await model.close()
+    assert created[0].close_calls == 1
+
+    with pytest.raises(CodexError, match="closed"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("again")])], None, params
+        )
+
+
+def test_codex_model_rejects_invalid_profile_values():
+    with pytest.raises(CodexError, match="performance_profile"):
+        CodexModel(
+            codex=FakeCodex(FakeThread({"tool_calls": [], "final": ""})),
+            performance_profile="fast",
+        )
+
+    with pytest.raises(CodexError, match="thread_reuse_mode"):
+        CodexModel(
+            codex=FakeCodex(FakeThread({"tool_calls": [], "final": ""})),
+            thread_reuse_mode="sometimes",
+        )
+
+
+@pytest.mark.asyncio
+async def test_codex_model_thread_start_params_include_extended_options():
+    thread_options = ThreadOptions(
+        model="gpt-5",
+        sandbox_mode="workspace-write",
+        working_directory="/tmp",
+        skip_git_repo_check=False,
+        model_instructions_file="/tmp/instructions.md",
+        model_personality="friendly",
+        max_threads=3,
+        network_access_enabled=True,
+        web_search_mode="live",
+        web_search_enabled=True,
+        web_search_cached_enabled=True,
+        shell_snapshot_enabled=True,
+        background_terminals_enabled=True,
+        apply_patch_freeform_enabled=True,
+        exec_policy_enabled=True,
+        remote_models_enabled=True,
+        collaboration_modes_enabled=True,
+        connectors_enabled=True,
+        responses_websockets_enabled=True,
+        request_compression_enabled=True,
+        feature_overrides={"experimental": True},
+        approval_policy="on-request",
+        additional_directories=["/tmp/a", "/tmp/b"],
+        config_overrides={"feature": "on"},
+    )
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-opts",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(
+        app_server=app,
+        thread_options=thread_options,
+        performance_profile="max",
+    )
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("opts")])], None, params)
+
+    sent = app.thread_start_calls[0]
+    assert sent["model"] == "gpt-5"
+    assert sent["cwd"] == "/tmp"
+    assert sent["sandbox_mode"] == "workspace-write"
+    assert sent["skip_git_repo_check"] is False
+    assert sent["model_instructions_file"] == "/tmp/instructions.md"
+    assert sent["model_personality"] == "friendly"
+    assert sent["max_threads"] == 3
+    assert sent["network_access_enabled"] is True
+    assert sent["web_search_mode"] == "live"
+    assert sent["web_search_enabled"] is True
+    assert sent["web_search_cached_enabled"] is True
+    assert sent["shell_snapshot_enabled"] is True
+    assert sent["background_terminals_enabled"] is True
+    assert sent["apply_patch_freeform_enabled"] is True
+    assert sent["exec_policy_enabled"] is True
+    assert sent["remote_models_enabled"] is True
+    assert sent["collaboration_modes_enabled"] is True
+    assert sent["connectors_enabled"] is True
+    assert sent["responses_websockets_enabled"] is True
+    assert sent["request_compression_enabled"] is True
+    assert sent["feature_overrides"] == {"experimental": True}
+    assert sent["approval_policy"] == "on-request"
+    assert sent["additional_directories"] == ["/tmp/a", "/tmp/b"]
+    assert sent["config_overrides"] == {"feature": "on"}
+
+
+@pytest.mark.asyncio
+async def test_codex_model_raises_when_thread_start_missing_id():
+    class MissingIdAppServer(FakeAppServerClient):
+        async def thread_start(self, **params):
+            self.thread_start_calls.append(dict(params))
+            return {"thread": {}}
+
+    app = MissingIdAppServer(
+        notifications=[],
+        final_turn={"id": "turn", "usage": {"inputTokens": 1, "outputTokens": 1}},
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    with pytest.raises(CodexError, match="thread/start response missing thread id"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("oops")])], None, params
+        )

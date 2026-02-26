@@ -19,6 +19,10 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - `CodexModel.thread_reuse_mode` with `"run"` (default) and `"always"` to control
   whether app-server threads are reused only for growing histories or across all calls.
 
+### Fixed
+- App-server-backed `CodexModel.request_stream(...)` now emits final text correctly even
+  when the server sends no incremental `item/updated` notifications before turn completion.
+
 ### Updated
 - PydanticAI model-provider runs now default to run-scoped thread reuse to avoid stale
   context/thread growth across same-length independent calls while preserving low latency

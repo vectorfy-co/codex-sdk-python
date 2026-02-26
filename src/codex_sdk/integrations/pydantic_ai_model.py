@@ -179,7 +179,9 @@ def _render_tool_section(title: str, tools: Sequence[ToolDefinition]) -> List[st
         if tool.description:
             lines.append(f"  description: {tool.description}")
         lines.append(f"  kind: {tool.kind}")
-        lines.append(f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}")
+        lines.append(
+            f"  parameters_json_schema: {_json_dumps(tool.parameters_json_schema)}"
+        )
         if tool.outer_typed_dict_key:
             lines.append(f"  outer_typed_dict_key: {tool.outer_typed_dict_key}")
         if tool.strict is not None:
@@ -287,7 +289,9 @@ def _render_message_history(messages: Sequence[ModelMessage]) -> str:
                     tool_call_id = getattr(part, "tool_call_id", "")
                     args = getattr(part, "args", None)
                     args_json = args if isinstance(args, str) else _json_dumps(args)
-                    lines.append(f"[tool-call:{tool_name} id={tool_call_id}] {args_json}")
+                    lines.append(
+                        f"[tool-call:{tool_name} id={tool_call_id}] {args_json}"
+                    )
                 elif part_kind == "thinking":
                     pass
                 else:
@@ -322,9 +326,7 @@ def _extract_json_object(text: str) -> Optional[Any]:
 
 def _is_envelope_candidate(value: Any) -> bool:
     """Return whether a decoded JSON object looks like the envelope shape."""
-    return isinstance(value, dict) and (
-        "tool_calls" in value or "final" in value
-    )
+    return isinstance(value, dict) and ("tool_calls" in value or "final" in value)
 
 
 def _to_int(value: Any) -> int:
@@ -347,7 +349,9 @@ def _usage_from_mapping(raw: Any) -> Optional[RequestUsage]:
         raw.get("cachedInputTokens", raw.get("cached_input_tokens"))
     )
     output_tokens = _to_int(raw.get("outputTokens", raw.get("output_tokens")))
-    details = {"cached_input_tokens": cached_input_tokens} if cached_input_tokens else {}
+    details = (
+        {"cached_input_tokens": cached_input_tokens} if cached_input_tokens else {}
+    )
     return RequestUsage(
         input_tokens=input_tokens,
         cache_read_tokens=cached_input_tokens,
@@ -401,7 +405,9 @@ def _extract_agent_text_from_item(item: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_usage_from_turn(turn: Optional[Mapping[str, Any]]) -> Optional[RequestUsage]:
+def _extract_usage_from_turn(
+    turn: Optional[Mapping[str, Any]],
+) -> Optional[RequestUsage]:
     """Extract usage metadata from a turn payload (best effort)."""
     if not isinstance(turn, Mapping):
         return None
@@ -674,7 +680,9 @@ class CodexModel(Model):
         self._performance_profile = performance_profile
         self._thread_reuse_mode = thread_reuse_mode
         self._thread_options = self._prepare_thread_options(thread_options)
-        self._legacy_codex = codex if app_server is None and app_server_options is None else None
+        self._legacy_codex = (
+            codex if app_server is None and app_server_options is None else None
+        )
 
         if profile is None:
             profile = ModelProfile(supports_tools=True)
@@ -825,9 +833,13 @@ class CodexModel(Model):
         if options.shell_snapshot_enabled is not None:
             params["shell_snapshot_enabled"] = options.shell_snapshot_enabled
         if options.background_terminals_enabled is not None:
-            params["background_terminals_enabled"] = options.background_terminals_enabled
+            params["background_terminals_enabled"] = (
+                options.background_terminals_enabled
+            )
         if options.apply_patch_freeform_enabled is not None:
-            params["apply_patch_freeform_enabled"] = options.apply_patch_freeform_enabled
+            params["apply_patch_freeform_enabled"] = (
+                options.apply_patch_freeform_enabled
+            )
         if options.exec_policy_enabled is not None:
             params["exec_policy_enabled"] = options.exec_policy_enabled
         if options.remote_models_enabled is not None:
@@ -837,7 +849,9 @@ class CodexModel(Model):
         if options.connectors_enabled is not None:
             params["connectors_enabled"] = options.connectors_enabled
         if options.responses_websockets_enabled is not None:
-            params["responses_websockets_enabled"] = options.responses_websockets_enabled
+            params["responses_websockets_enabled"] = (
+                options.responses_websockets_enabled
+            )
         if options.request_compression_enabled is not None:
             params["request_compression_enabled"] = options.request_compression_enabled
         if options.feature_overrides is not None:
@@ -1036,7 +1050,9 @@ class CodexModel(Model):
                 continue
 
             item_id_raw = item.get("id")
-            item_id = str(item_id_raw) if item_id_raw is not None else "__agent_message__"
+            item_id = (
+                str(item_id_raw) if item_id_raw is not None else "__agent_message__"
+            )
             previous = state.item_text_by_id.get(item_id, "")
             if text.startswith(previous):
                 delta = text[len(previous) :]
@@ -1119,8 +1135,30 @@ class CodexModel(Model):
 
         if model_request_parameters.allow_text_output and final_value:
             parts.append(TextPart(final_value))
-            if streamed is not None and not allow_stream_text:
-                streamed.push_text_delta(vendor_part_id=0, content=final_value)
+            if streamed is not None:
+                if allow_stream_text:
+                    if not state.item_text_by_id:
+                        streamed.push_text_delta(vendor_part_id=0, content=final_value)
+                    else:
+                        last_item_id = next(reversed(state.item_text_by_id))
+                        last_text = state.item_text_by_id[last_item_id]
+                        if final_value.startswith(last_text):
+                            remainder = final_value[len(last_text) :]
+                            if remainder:
+                                vendor_part_id = state.vendor_part_ids.get(
+                                    last_item_id, 0
+                                )
+                                streamed.push_text_delta(
+                                    vendor_part_id=vendor_part_id,
+                                    content=remainder,
+                                )
+                        elif final_value != last_text:
+                            streamed.push_text_delta(
+                                vendor_part_id=state.next_vendor_part_id,
+                                content=final_value,
+                            )
+                else:
+                    streamed.push_text_delta(vendor_part_id=0, content=final_value)
 
         return parts, usage
 
