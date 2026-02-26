@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download and install vendored Codex CLI binaries for the Python SDK."""
+"""Download and install local Codex CLI binaries for the Python SDK."""
 
 import os
 import platform
@@ -186,6 +186,7 @@ def setup_vendor_directory(package_dirs: List[Path], sdk_dir: Path):
         )
 
     print("SUCCESS: Vendor directory set up successfully")
+    print("NOTE: src/codex_sdk/vendor is local-only and should not be committed.")
 
     # Show what platforms are available
     platforms = sorted(d.name for d in vendor_dest.iterdir() if d.is_dir())

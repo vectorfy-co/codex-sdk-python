@@ -377,17 +377,19 @@ TurnOptions(
 - `output_schema` must be a JSON object (mapping). The SDK writes it to a temp file and passes `--output-schema`.
 - `signal` is an `AbortSignal` for canceling an in-flight turn.
 
-### Bundled CLI binary and platform support
+### CLI binary resolution and platform support
 
-The SDK resolves a platform-specific Codex CLI binary under `src/codex_sdk/vendor/<target>/codex/`.
-It selects the target triple based on OS and CPU and ensures the binary is executable on POSIX.
+The SDK resolves a platform-specific Codex CLI binary under
+`src/codex_sdk/vendor/<target>/codex/` when present locally.
+That vendor cache is not committed to git. If no local vendor binary exists,
+the SDK falls back to the `codex` executable on `PATH`.
 
 Supported target triples:
 - Linux: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
 - macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
 - Windows: `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`
 
-If you are working from source and the vendor directory is missing, run
+If you are working from source and the local vendor directory is missing, run
 `python scripts/setup_binary.py` to fetch and assemble the platform `@openai/codex`
 artifacts into `src/codex_sdk/vendor/`.
 

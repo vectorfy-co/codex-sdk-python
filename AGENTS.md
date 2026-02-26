@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/codex_sdk/` is the Python package. It includes the SDK modules and the bundled Codex CLI binaries under `src/codex_sdk/vendor/<target>/codex/`.
+- `src/codex_sdk/` is the Python package. It includes the SDK modules and supports an optional local Codex CLI cache under `src/codex_sdk/vendor/<target>/codex/` (gitignored).
 - `tests/` contains the pytest suite.
 - `examples/` contains runnable scripts for common SDK flows.
 - `scripts/` contains maintenance helpers such as `setup_binary.py`.
@@ -9,8 +9,8 @@
 
 ## Build, Test, and Development Commands
 - `uv sync` installs dev dependencies from `pyproject.toml`.
-- `python scripts/setup_binary.py` downloads and installs the Codex CLI binaries (requires Node.js/npm).
-  It resolves the latest `@openai/codex` version and assembles per-platform npm artifacts into `src/codex_sdk/vendor/`.
+- `python scripts/setup_binary.py` downloads and installs local Codex CLI binaries (requires Node.js/npm).
+  It resolves the latest `@openai/codex` version and assembles per-platform npm artifacts into `src/codex_sdk/vendor/` for local runs only (not committed).
 - `python examples/basic_usage.py` runs a quick smoke test of the SDK.
 - `uv run pytest` runs the test suite.
 - `uv run pytest --cov=codex_sdk` runs tests with coverage enforcement.
