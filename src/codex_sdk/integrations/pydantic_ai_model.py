@@ -86,6 +86,7 @@ class _TurnAccumulationState:
 
     latest_agent_text: str = ""
     item_text_by_id: Dict[str, str] = field(default_factory=dict)
+    last_updated_item_id: Optional[str] = None
     vendor_part_ids: Dict[str, int] = field(default_factory=dict)
     next_vendor_part_id: int = 0
     usage: Optional[RequestUsage] = None
@@ -1059,6 +1060,7 @@ class CodexModel(Model):
             else:
                 delta = text
             state.item_text_by_id[item_id] = text
+            state.last_updated_item_id = item_id
             if not delta:
                 continue
 
@@ -1140,7 +1142,11 @@ class CodexModel(Model):
                     if not state.item_text_by_id:
                         streamed.push_text_delta(vendor_part_id=0, content=final_value)
                     else:
-                        last_item_id = next(reversed(state.item_text_by_id))
+                        last_item_id = (
+                            state.last_updated_item_id
+                            if state.last_updated_item_id in state.item_text_by_id
+                            else next(reversed(state.item_text_by_id))
+                        )
                         last_text = state.item_text_by_id[last_item_id]
                         if final_value.startswith(last_text):
                             remainder = final_value[len(last_text) :]

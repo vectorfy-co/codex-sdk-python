@@ -750,6 +750,44 @@ async def test_codex_model_default_stream_emits_incremental_text_deltas():
 
 
 @pytest.mark.asyncio
+async def test_codex_model_stream_reconciles_with_most_recent_item_update():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "a"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m2", "type": "agent_message", "text": "b"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "abc"}},
+            ),
+        ],
+        final_turn={
+            "id": "turn-reconcile",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+            "finalResponse": "abcd",
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        _ = [event async for event in streamed]
+        response = streamed.get()
+
+    assert [part.content for part in response.parts if isinstance(part, TextPart)] == [
+        "abcd",
+        "b",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_codex_model_default_run_reuse_mode_resets_on_equal_history_length():
     app = FakeAppServerClient(
         notifications=[],
