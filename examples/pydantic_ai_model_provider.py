@@ -2,7 +2,7 @@
 Example: use Codex as a PydanticAI model provider.
 
 This lets PydanticAI manage tools + validation, while Codex generates tool-call
-plans and final responses via `codex exec --output-schema`.
+plans and final responses through the app-server-backed CodexModel runtime.
 
 Requires:
   uv add "codex-sdk-python[pydantic-ai]"
