@@ -559,6 +559,7 @@ class AppServerClient:
         source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
         cwd: Optional[Union[str, Path]] = None,
+        search_term: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
@@ -572,6 +573,7 @@ class AppServerClient:
             archived: If set, restrict results to archived (`True`) or unarchived (`False`)
                 threads.
             cwd: Optional working directory scope for server-side filtering.
+            search_term: Optional substring filter for the extracted thread title.
 
         Returns:
             The raw response dictionary returned by the app-server for the `thread/list`
@@ -592,6 +594,8 @@ class AppServerClient:
             params["archived"] = archived
         if cwd is not None:
             params["cwd"] = str(cwd)
+        if search_term is not None:
+            params["search_term"] = search_term
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
 
     async def thread_read(

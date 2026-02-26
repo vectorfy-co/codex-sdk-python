@@ -11,6 +11,7 @@ pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
 
+from codex_sdk.app_server import AppServerNotification
 from codex_sdk.events import Usage
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
@@ -607,3 +608,173 @@ async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
     events = [event async for event in resp]
     assert events
     assert resp.provider_url is None
+
+
+class FakeAppServerTurnSession:
+    def __init__(self, notifications, final_turn):
+        self._notifications = list(notifications)
+        self._final_turn = dict(final_turn)
+
+    async def notifications(self):
+        for notification in self._notifications:
+            yield notification
+
+    async def wait(self):
+        return self._final_turn
+
+
+class FakeAppServerClient:
+    def __init__(self, *, notifications, final_turn, thread_id="thread-app"):
+        self._notifications = list(notifications)
+        self._final_turn = dict(final_turn)
+        self._thread_id = thread_id
+        self.start_calls = 0
+        self.close_calls = 0
+        self.thread_start_calls = []
+        self.turn_session_calls = []
+
+    async def start(self):
+        self.start_calls += 1
+
+    async def close(self):
+        self.close_calls += 1
+
+    async def thread_start(self, **params):
+        self.thread_start_calls.append(dict(params))
+        return {"thread": {"id": self._thread_id}}
+
+    async def turn_session(self, thread_id, input, **params):
+        self.turn_session_calls.append(
+            {"thread_id": thread_id, "input": input, "params": dict(params)}
+        )
+        return FakeAppServerTurnSession(self._notifications, self._final_turn)
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_path_uses_app_server_and_returns_tool_calls():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-1",
+            "usage": {"inputTokens": 4, "cachedInputTokens": 1, "outputTokens": 2},
+            "finalResponse": (
+                '{"tool_calls":[{"id":"call_1","name":"add","arguments":"{\\"a\\":1,\\"b\\":2}"}],'
+                '"final":""}'
+            ),
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    response = await model.request(
+        [ModelRequest(parts=[UserPromptPart("calculate")])],
+        None,
+        ModelRequestParameters(
+            output_mode="tool",
+            allow_text_output=False,
+            function_tools=[
+                ToolDefinition(
+                    name="add",
+                    description="add two numbers",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "integer"},
+                            "b": {"type": "integer"},
+                        },
+                        "required": ["a", "b"],
+                        "additionalProperties": False,
+                    },
+                )
+            ],
+        ),
+    )
+
+    assert app.start_calls >= 1
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 1
+    assert response.provider_details == {"thread_id": "thread-app"}
+    assert response.usage.input_tokens == 4
+    assert response.usage.cache_read_tokens == 1
+    assert response.usage.output_tokens == 2
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], ToolCallPart)
+    assert response.parts[0].tool_name == "add"
+    assert response.parts[0].tool_call_id == "call_1"
+    assert response.parts[0].args == '{"a":1,"b":2}'
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_stream_emits_incremental_text_deltas():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hel"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hello"}},
+            ),
+        ],
+        final_turn={
+            "id": "turn-2",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+            "finalResponse": "hello",
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        events = [event async for event in streamed]
+        response = streamed.get()
+
+    assert app.start_calls >= 1
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 1
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_run_reuse_mode_resets_on_equal_history_length():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-run",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("alpha")])], None, params)
+    await model.request([ModelRequest(parts=[UserPromptPart("beta")])], None, params)
+
+    assert len(app.thread_start_calls) == 2
+    assert len(app.turn_session_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_codex_model_always_reuse_mode_reuses_on_equal_history_length():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-always",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app, thread_reuse_mode="always")
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("alpha")])], None, params)
+    await model.request([ModelRequest(parts=[UserPromptPart("beta")])], None, params)
+
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 2

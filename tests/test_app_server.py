@@ -295,6 +295,7 @@ async def test_app_server_methods_and_input_normalization(
             model_providers=["openai"],
             archived=True,
             cwd=tmp_path,
+            search_term="Fix",
         )
     )
     _, payload = await expect_request(
@@ -303,6 +304,7 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"]["modelProviders"] == ["openai"]
     assert payload["params"]["archived"] is True
     assert payload["params"]["cwd"] == str(tmp_path)
+    assert payload["params"]["searchTerm"] == "Fix"
 
     task = asyncio.create_task(client.thread_read("t1", include_turns=True))
     _, payload = await expect_request(task, "thread/read", {"thread": {"id": "t1"}})

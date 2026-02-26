@@ -2,6 +2,29 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.105.0] - 2026-02-25
+
+### Breaking
+- `CodexModel` now defaults to (and is implemented with) Codex app-server transport for
+  PydanticAI model-provider requests, replacing per-turn `codex exec --output-schema`
+  subprocess orchestration.
+- `CodexModel.request_stream(...)` now emits incremental stream events during turn
+  processing instead of a single synthetic chunk after completion.
+
+### Added
+- `CodexModel.close()` to explicitly release owned app-server resources and reset cached
+  thread state.
+- `CodexModel.performance_profile` with `"balanced"` (default) and `"max"` options for
+  speed/quality tradeoff control.
+- `CodexModel.thread_reuse_mode` with `"run"` (default) and `"always"` to control
+  whether app-server threads are reused only for growing histories or across all calls.
+
+### Updated
+- PydanticAI model-provider runs now default to run-scoped thread reuse to avoid stale
+  context/thread growth across same-length independent calls while preserving low latency
+  within a single growing run.
+- Version bumped to `0.105.0` (`pyproject.toml`, `codex_sdk.__version__`, README badge).
+
 ## [0.104.1] - 2026-02-25
 
 ### Fixed

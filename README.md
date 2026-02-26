@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.104.1-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.104.1 badge" />
+        <img src="https://img.shields.io/badge/Release-0.105.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.105.0 badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -619,9 +619,15 @@ Additional controls:
 
 This SDK offers two ways to integrate with PydanticAI:
 
+Note: starting in `0.105.0`, `CodexModel` is app-server-backed by default and no
+longer relies on per-turn `codex exec` subprocess orchestration.
+
 ### 1) Codex as a PydanticAI model provider
 
 Use `CodexModel` to delegate tool-call planning and text generation to Codex, while PydanticAI executes tools and validates outputs.
+`CodexModel` now uses a persistent app-server session by default with run-scoped thread
+reuse (`thread_reuse_mode="run"`), so non-growing histories start a fresh thread.
+Set `thread_reuse_mode="always"` to keep one thread across calls on the same model instance.
 
 ```python
 from pydantic_ai import Agent, Tool
@@ -646,11 +652,12 @@ print(result.output)
 ```
 
 How it works:
-- `CodexModel` builds a JSON schema envelope with `tool_calls` and `final`.
+- `CodexModel` sends each request through Codex app-server turn APIs using a persistent thread.
+- `CodexModel` uses a JSON envelope (`tool_calls` + `final`) for host-managed tool loops.
 - Codex emits tool calls as JSON strings; PydanticAI runs them.
 - If `allow_text_output` is true, Codex can place final text in `final`.
-- Streaming APIs (`Agent.run_stream_events()`, `Agent.run_stream_sync()`) are supported; Codex
-  emits streamed responses as a single chunk once the turn completes.
+- Streaming APIs (`Agent.run_stream_events()`, `Agent.run_stream_sync()`) are supported with
+  incremental streamed events.
 
 Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`
@@ -658,6 +665,10 @@ Safety defaults (you can override with your own `ThreadOptions`):
 - `approval_policy="never"`
 - `web_search_mode="disabled"`
 - `network_access_enabled=False`
+
+Lifecycle note:
+- `CodexModel` keeps an app-server session open while active. Call `await model.close()` when
+  shutting down long-lived processes.
 
 ### 2) Codex as a PydanticAI tool (handoff)
 
@@ -773,15 +784,12 @@ sequenceDiagram
 sequenceDiagram
   participant Agent as PydanticAI Agent
   participant Model as CodexModel
-  participant SDK as Codex SDK
-  participant CLI as codex exec
+  participant App as Codex app-server
   participant Tools as User Tools
 
   Agent->>Model: request(messages, tools)
-  Model->>SDK: start_thread + run_json(prompt, output_schema)
-  SDK->>CLI: codex exec --output-schema
-  CLI-->>SDK: JSON envelope {tool_calls, final}
-  SDK-->>Model: ParsedTurn
+  Model->>App: thread/start (once) + turn/session
+  App-->>Model: turn notifications + final turn
   alt tool_calls present
     Model-->>Agent: ToolCallPart(s)
     Agent->>Tools: execute tool(s)
