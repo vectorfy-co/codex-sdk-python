@@ -9,8 +9,8 @@
 
 ## Build, Test, and Development Commands
 - `uv sync` installs dev dependencies from `pyproject.toml`.
-- `python scripts/setup_binary.py` downloads and installs the Codex CLI binaries (requires Node.js/npm).
-  It resolves the latest `@openai/codex` version and assembles per-platform npm artifacts into `src/codex_sdk/vendor/`.
+- `python scripts/setup_binary.py` downloads and installs the Codex CLI binaries (direct registry download by default; no Node.js/npm required).
+  It resolves the latest `@openai/codex` version and assembles per-platform artifacts into `src/codex_sdk/vendor/`.
 - `python examples/basic_usage.py` runs a quick smoke test of the SDK.
 - `uv run pytest` runs the test suite.
 - `uv run pytest --cov=codex_sdk` runs tests with coverage enforcement.

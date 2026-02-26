@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.104.1-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.104.1 badge" />
+        <img src="https://img.shields.io/badge/Release-0.105.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release 0.105.0 badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -37,7 +37,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
 </div>
 
 - Runtime dependency-free: uses only the Python standard library.
-- Codex CLI binaries are downloaded separately; use `scripts/setup_binary.py` from the repo or install the Codex CLI and set `codex_path_override`.
+- Codex CLI binaries can be sourced either from the vendored `src/codex_sdk/vendor/` tree (when present) or from a system-installed `codex` binary (`codex_path_override` supported).
 - Async-first API with sync helpers, streaming events, and structured output.
 - Python 3.8/3.9 support is deprecated and will be removed in a future release; use Python 3.10+.
 
@@ -132,6 +132,8 @@ python examples/app_server_turn_session.py
 python examples/config_overrides.py
 python examples/hooks_streaming.py
 python examples/notify_hook.py
+python examples/pydantic_ai_run_compat.py
+python examples/pydantic_ai_run_stream_compat.py
 ```
 
 <a id="features"></a>
@@ -148,6 +150,15 @@ python examples/notify_hook.py
 | ![PydanticAI](https://img.shields.io/badge/PydanticAI-Model%20Provider-0b3b2e?style=flat&logo=pydantic&logoColor=white) | Codex can act as a PydanticAI model or as a delegated tool.            |
 | ![Abort](https://img.shields.io/badge/Abort-Signals-ef4444?style=flat&logo=gnubash&logoColor=white)                | Cancel running turns via `AbortController` and `AbortSignal`.           |
 | ![Telemetry](https://img.shields.io/badge/Telemetry-Logfire%20Spans-f97316?style=flat&logo=simpleicons&logoColor=white) | Optional spans if Logfire is installed and initialized.                 |
+
+### Execution surfaces and transports
+
+| Surface | Primary transport | Typical use |
+| ------- | ----------------- | ----------- |
+| `Codex` + `Thread` | `codex exec --experimental-json` (JSONL over stdio) | Conversational turns, streaming item events, structured output (`run_json` / `run_pydantic`). |
+| `AppServerClient` | `codex app-server` (JSON-RPC over stdio) | Full app-server protocol: thread management, turn sessions, approvals, account/config/skills APIs. |
+| `CodexModel` (PydanticAI provider) | `Thread.run_json(...)` on top of `codex exec` | Tool-call planning + optional final text via strict JSON envelope. |
+| `codex_handoff_tool` (PydanticAI tool) | `Thread.run(...)` on top of `codex exec` | Delegate repository-aware tasks from another model to Codex. |
 
 <a id="configuration"></a>
 ## ![Configuration](https://img.shields.io/badge/Configuration-Options%20%26%20Env-0ea5e9?style=for-the-badge&logo=json&logoColor=white)
@@ -276,6 +287,10 @@ For richer integrations (thread fork, requirements, explicit skill input), use t
 protocol. The client handles the initialize/initialized handshake and gives you access to
 JSON-RPC notifications.
 
+`AppServerClient` starts `codex app-server` and multiplexes notifications + server-initiated
+requests (for example approval requests in `turn_session(...)`) on top of the same stdio
+connection.
+
 ```python
 import asyncio
 from codex_sdk import AppServerClient, AppServerOptions
@@ -390,6 +405,11 @@ Supported target triples:
 If you are working from source and the vendor directory is missing, run
 `python scripts/setup_binary.py` to fetch and assemble the platform `@openai/codex`
 artifacts into `src/codex_sdk/vendor/`.
+
+`scripts/setup_binary.py` behavior:
+- Resolves `CODEX_NPM_VERSION` when set; otherwise resolves latest `@openai/codex`.
+- Tries legacy `@openai/codex-sdk` package first, then falls back to per-target `@openai/codex@<version>-<suffix>` artifacts.
+- Rebuilds `src/codex_sdk/vendor/` for all supported targets and validates current-platform binary presence.
 
 <a id="auth"></a>
 ## ![Auth](https://img.shields.io/badge/Auth%20%26%20Credentials-Access-2563eb?style=for-the-badge&logo=gnubash&logoColor=white)
@@ -597,6 +617,8 @@ Example scripts under `examples/`:
 - `notify_hook.py`: notify script for CLI callbacks.
 - `pydantic_ai_model_provider.py`: Codex as a PydanticAI model provider.
 - `pydantic_ai_handoff.py`: Codex as a PydanticAI tool.
+- `pydantic_ai_run_compat.py`: minimal compatibility harness for `Agent.run(...)`.
+- `pydantic_ai_run_stream_compat.py`: minimal compatibility harness for `Agent.run_stream(...)`.
 
 <a id="sandbox"></a>
 ## ![Sandbox](https://img.shields.io/badge/Sandbox-Permissions%20%26%20Safety-1f2937?style=for-the-badge&logo=gnubash&logoColor=white)
@@ -649,8 +671,9 @@ How it works:
 - `CodexModel` builds a JSON schema envelope with `tool_calls` and `final`.
 - Codex emits tool calls as JSON strings; PydanticAI runs them.
 - If `allow_text_output` is true, Codex can place final text in `final`.
-- Streaming APIs (`Agent.run_stream_events()`, `Agent.run_stream_sync()`) are supported; Codex
-  emits streamed responses as a single chunk once the turn completes.
+- Streaming APIs (`Agent.run_stream(...)`, `Agent.run_stream_events()`, `Agent.run_stream_sync()`)
+  are supported for compatibility; response parts are emitted after the underlying `run_json(...)`
+  turn completes (not token-by-token from Codex).
 
 Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`
@@ -713,38 +736,47 @@ If `logfire` is installed and initialized, the SDK emits spans:
 If Logfire is missing or not initialized, the span context manager is a no-op.
 
 <a id="architecture"></a>
-<a id="acheature"></a>
 ## ![Architecture](https://img.shields.io/badge/Architecture-Stack%20map-1f2937?style=for-the-badge&logo=serverless&logoColor=white)
 
-### System components
+### System components and transport paths
 
 ```mermaid
 flowchart LR
   subgraph App[Your Python App]
     U[User Code]
-    T[Thread API]
+    T[Codex + Thread API]
+    A[AppServerClient API]
+    M[PydanticAI Integrations]
   end
 
   subgraph SDK[Codex SDK]
     C[Codex]
     E[CodexExec]
-    P[Event Parser]
+    P[Thread Event Parser]
+    R[JSON-RPC Client]
   end
 
-  subgraph CLI[Bundled Codex CLI]
+  subgraph CLI[Codex CLI]
     X["codex exec --experimental-json"]
+    S["codex app-server"]
   end
 
   FS[(Filesystem)]
   NET[(Network)]
 
   U --> T --> C --> E --> X
+  U --> A --> R --> S
+  U --> M
+  M --> C
   X -->|JSONL events| P --> T
+  S -->|JSON-RPC messages| R --> A
   X --> FS
   X --> NET
+  S --> FS
+  S --> NET
 ```
 
-### Streaming event lifecycle
+### Thread API streaming lifecycle (`codex exec`)
 
 ```mermaid
 sequenceDiagram
@@ -767,7 +799,29 @@ sequenceDiagram
   Thread-->>Dev: turn.completed / turn.failed
 ```
 
-### PydanticAI model-provider loop
+### App-server lifecycle (`codex app-server`)
+
+```mermaid
+sequenceDiagram
+  participant Dev as Developer
+  participant App as AppServerClient
+  participant CLI as codex app-server
+
+  Dev->>App: start()
+  App->>CLI: spawn process
+  App->>CLI: initialize
+  CLI-->>App: initialize result
+  App->>CLI: initialized (notification)
+  Dev->>App: turn_session(thread_id, input)
+  App->>CLI: turn/start
+  CLI-->>App: thread/turn/item notifications
+  CLI-->>App: request (approval needed)
+  App-->>CLI: response (approve/reject)
+  CLI-->>App: turn completed notification
+  App-->>Dev: final turn payload
+```
+
+### PydanticAI model-provider loop (current implementation)
 
 ```mermaid
 sequenceDiagram
@@ -797,11 +851,17 @@ sequenceDiagram
 flowchart LR
   Agent[PydanticAI Agent] --> Tool[codex_handoff_tool]
   Tool --> SDK[Codex SDK Thread]
-  SDK --> CLI[Codex CLI]
+  SDK --> CLI[codex exec]
   CLI --> SDK
   SDK --> Tool
   Tool --> Agent
 ```
+
+### Streaming semantics summary
+
+- `Thread.run_streamed()` and `Thread.run_streamed_events()` stream incremental `ThreadEvent` values as JSONL lines arrive from `codex exec`.
+- `AppServerClient.notifications()` streams incremental JSON-RPC notifications from `codex app-server`.
+- `CodexModel.request_stream(...)` exposes a stream-compatible interface for PydanticAI, but events are emitted from an already-completed `run_json(...)` result.
 
 <a id="testing"></a>
 ## ![Testing](https://img.shields.io/badge/Testing-Pytest%20%26%20Coverage-2563eb?style=for-the-badge&logo=pytest&logoColor=white)
@@ -811,9 +871,12 @@ This repo uses unit tests with mocked CLI processes to keep the test suite fast 
 Test focus areas:
 - `tests/test_exec.py`: CLI invocation, environment handling, config flags, abort behavior.
 - `tests/test_thread.py`: parsing, streaming, JSON schema, Pydantic validation, input normalization.
+- `tests/test_app_server.py` and `tests/test_app_server_session.py`: JSON-RPC lifecycle, method wrappers, turn-session approvals/notifications.
 - `tests/test_codex.py`: resume helpers and option wiring.
+- `tests/test_config_overrides.py`: `--config` serialization and merge behavior.
 - `tests/test_abort.py`: abort signal semantics.
 - `tests/test_telemetry.py`: Logfire span behavior.
+- `tests/test_tool_envelope.py`: tool envelope parsing and schema normalization helpers.
 - `tests/test_pydantic_ai_*`: PydanticAI model provider and handoff integration.
 
 ### Run tests
@@ -855,10 +918,21 @@ uv run mypy src
 ## ![CI/CD](https://img.shields.io/badge/CI%2FCD-Overview-1F4B99?style=for-the-badge&logo=gnubash&logoColor=white)
 
 This repository includes GitHub Actions workflows under `.github/workflows/`.
-The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
-Release automation creates GitHub releases from `CHANGELOG_SDK.md` when you push a
-`vX.Y.Z` tag or manually dispatch the workflow, then the publish workflow uploads
-the package to PyPI on release publish.
+
+Current workflows:
+- `ci.yml`: lint (`black`, `isort`, `flake8`), type-check (`mypy`), and tests (`pytest --cov=codex_sdk`) on Python 3.10/3.11/3.12.
+- `release.yml`: extracts release notes from `CHANGELOG_SDK.md` and creates a GitHub Release for `vX.Y.Z`.
+- `publish.yml`: builds (`uv build --no-sources`) and publishes to PyPI on release publish (or successful release workflow).
+- `docs-deploy.yml`: optional docs deployment (gated by `DOCS_DEPLOY_ENABLED`).
+- `uv-lock-update.yml`: scheduled weekly lockfile refresh PR.
+
+`ci.yml` test jobs install Node.js and run:
+
+```bash
+python scripts/setup_binary.py
+```
+
+before `pytest`, so test runs do not depend on committed vendor binary updates.
 
 <a id="operations"></a>
 ## ![Operations](https://img.shields.io/badge/Operations-Health%20%26%20Sessions-10b981?style=for-the-badge&logo=serverless&logoColor=white)

@@ -2,21 +2,33 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## [0.104.1] - 2026-02-25
+## [Unreleased]
+
+## [0.105.0] - 2026-02-26
 
 ### Fixed
-- Fix pydantic-ai `request_stream` compatibility by accepting optional `run_context`
+- Fix pydantic-ai request_stream compatibility by accepting optional `run_context`
   in `CodexModel.request_stream(...)`.
 - Add `CodexStreamedResponse.provider_url` for newer pydantic-ai stream interfaces.
 
-### Added
-- Reproduction harness examples for `Agent.run_stream(...)` and `Agent.run(...)`
-  with `CodexModel` to quickly verify streaming and non-stream integration paths.
+### Updated
+- README architecture and systems documentation now reflects both transport paths:
+  `codex exec --experimental-json` (Thread API) and `codex app-server` (JSON-RPC).
+- README PydanticAI streaming notes now document compatibility semantics (stream
+  interface support with response parts emitted after the underlying JSON turn).
+- README CI/CD and binary setup sections expanded with explicit workflow details and
+  guidance for CI environments that download Codex binaries.
+- CI test workflow now runs `python scripts/setup_binary.py` before pytest, so
+  tests do not require committing updated vendor binaries.
+- `scripts/setup_binary.py` now supports direct registry downloads by default
+  (no npm/Node dependency required), with optional `CODEX_SETUP_TRANSPORT=npm`
+  for npm-pack mode.
+- SDK package version bumped to `0.105.0` (`pyproject.toml`,
+  `codex_sdk.__version__`, README release badge).
 
 ### Notes
-- Tested pydantic-ai-slim versions: `0.8.1` (repo baseline), `1.56.0`, and `1.63.0`.
-- Compatibility boundary verified from published wheels: `run_context` is introduced
-  in stream contracts starting at `pydantic-ai-slim 0.7.0`.
+- Tested with pydantic-ai-slim versions from `0.8.1` through `1.63.0`
+  (including `1.56.0` and `1.63.0` stream invocation checks).
 
 ## [0.104.0] - 2026-02-18
 

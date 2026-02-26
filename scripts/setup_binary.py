@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""Download and install vendored Codex CLI binaries for the Python SDK."""
+"""Download and install vendored Codex CLI binaries for the Python SDK.
 
+By default this script downloads package tarballs directly from the npm registry API
+and does not require Node.js/npm.
+"""
+
+import json
 import os
 import platform
 import shutil
@@ -8,7 +13,10 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
 TARGET_TO_SUFFIX = {
     "aarch64-apple-darwin": "darwin-arm64",
@@ -18,6 +26,117 @@ TARGET_TO_SUFFIX = {
     "aarch64-pc-windows-msvc": "win32-arm64",
     "x86_64-pc-windows-msvc": "win32-x64",
 }
+
+NPM_REGISTRY_URL = "https://registry.npmjs.org"
+
+
+def _resolve_network_timeout_seconds() -> float:
+    """Resolve timeout for network requests, defaulting to 30 seconds."""
+    raw = os.environ.get("CODEX_SETUP_NETWORK_TIMEOUT_SECONDS", "30").strip()
+    try:
+        timeout = float(raw)
+    except ValueError:
+        print(
+            "WARNING: Invalid CODEX_SETUP_NETWORK_TIMEOUT_SECONDS="
+            f"{raw!r}; falling back to 30."
+        )
+        return 30.0
+    if timeout <= 0:
+        print(
+            "WARNING: CODEX_SETUP_NETWORK_TIMEOUT_SECONDS must be > 0; "
+            "falling back to 30."
+        )
+        return 30.0
+    return timeout
+
+
+NETWORK_TIMEOUT_SECONDS = _resolve_network_timeout_seconds()
+
+
+def _validate_https_url(url: str, *, source: str) -> None:
+    """Ensure URL uses https and includes a host."""
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme != "https" or not parsed.netloc:
+        raise RuntimeError(
+            f"Refusing {source} from unsupported URL {url!r}. "
+            "Only absolute https URLs are allowed."
+        )
+
+
+def get_transport() -> str:
+    """Return the package download transport mode."""
+    requested = os.environ.get("CODEX_SETUP_TRANSPORT", "direct").strip().lower()
+    if requested not in {"direct", "npm"}:
+        print(
+            f"WARNING: Unknown CODEX_SETUP_TRANSPORT={requested!r}; "
+            "falling back to 'direct'."
+        )
+        return "direct"
+    return requested
+
+
+def _registry_json(path: str) -> dict:
+    """Fetch and decode JSON from the npm registry."""
+    url = f"{NPM_REGISTRY_URL}/{path.lstrip('/')}"
+    _validate_https_url(url, source="registry metadata request")
+    request = Request(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError:
+        raise
+    except URLError as exc:
+        raise RuntimeError(f"Failed to fetch registry metadata from {url}") from exc
+
+
+def _download_file(url: str, destination: Path) -> None:
+    """Download a URL to a destination path."""
+    _validate_https_url(url, source="file download")
+    request = Request(url)
+    try:
+        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            with destination.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+    except URLError as exc:
+        raise RuntimeError(f"Failed to download file from {url}") from exc
+
+
+def _download_tarball_from_registry(
+    package_name: str, package_version: str, destination_dir: Path
+) -> Optional[Path]:
+    """
+    Download a package tarball from npm registry metadata.
+
+    Returns:
+        Path to the downloaded tarball, or None if that package version does not exist.
+    """
+    encoded_name = quote(package_name, safe="")
+    encoded_version = quote(package_version, safe="")
+    metadata_path = f"{encoded_name}/{encoded_version}"
+
+    try:
+        metadata = _registry_json(metadata_path)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    except URLError as exc:
+        raise RuntimeError(
+            f"Failed to reach npm registry for {package_name}@{package_version}"
+        ) from exc
+
+    tarball_url = metadata.get("dist", {}).get("tarball")
+    if not tarball_url:
+        raise RuntimeError(
+            f"npm registry metadata missing dist.tarball for "
+            f"{package_name}@{package_version}"
+        )
+
+    file_name = tarball_url.rsplit("/", 1)[-1]
+    tarball_path = destination_dir / file_name
+    _download_file(tarball_url, tarball_path)
+    return tarball_path
 
 
 def run_command(cmd, cwd=None, check=True):
@@ -37,27 +156,31 @@ def run_command(cmd, cwd=None, check=True):
         raise
 
 
-def check_dependencies():
-    """Check if required dependencies are installed."""
-    print("Checking dependencies...")
+def check_dependencies(transport: str) -> bool:
+    """Check runtime dependencies for the selected transport mode."""
+    print(f"Checking dependencies for transport='{transport}'...")
 
-    # Check if npm is available
+    if transport == "direct":
+        print("OK: direct transport selected (no npm dependency).")
+        return True
+
+    # npm mode
     try:
         result = run_command(["npm", "--version"], check=False)
         if result.returncode != 0:
             print("ERROR: npm is not installed. Please install Node.js and npm first.")
-            print("   You can install it with: conda install nodejs")
+            print("   Or use CODEX_SETUP_TRANSPORT=direct")
             return False
         print(f"OK: npm version: {result.stdout.strip()}")
     except FileNotFoundError:
         print("ERROR: npm is not found. Please install Node.js and npm first.")
-        print("   You can install it with: conda install nodejs")
+        print("   Or use CODEX_SETUP_TRANSPORT=direct")
         return False
 
     return True
 
 
-def resolve_codex_version() -> str:
+def resolve_codex_version(transport: str) -> str:
     """Resolve the Codex npm version to install."""
     requested = os.environ.get("CODEX_NPM_VERSION", "").strip()
     if requested:
@@ -65,10 +188,20 @@ def resolve_codex_version() -> str:
         return requested
 
     print("Resolving latest @openai/codex version...")
-    result = run_command(["npm", "view", "@openai/codex", "version"])
-    version = result.stdout.strip()
+    if transport == "npm":
+        result = run_command(["npm", "view", "@openai/codex", "version"])
+        version = result.stdout.strip()
+        if not version:
+            raise RuntimeError("Could not resolve @openai/codex version from npm")
+        print(f"Resolved @openai/codex version: {version}")
+        return version
+
+    latest = _registry_json(f"{quote('@openai/codex', safe='')}/latest")
+    version = latest.get("version", "").strip()
     if not version:
-        raise RuntimeError("Could not resolve @openai/codex version from npm")
+        raise RuntimeError(
+            "Could not resolve @openai/codex latest version from registry"
+        )
     print(f"Resolved @openai/codex version: {version}")
     return version
 
@@ -83,9 +216,9 @@ def extract_tarball(tarball_path: Path, destination: Path) -> Path:
     return package_dir
 
 
-def download_codex_packages(version: str) -> Tuple[Path, List[Path]]:
+def download_codex_packages(version: str, transport: str) -> Tuple[Path, List[Path]]:
     """Download package(s) that contain vendor binaries for all target platforms."""
-    print("Downloading Codex npm packages...")
+    print(f"Downloading Codex packages (transport='{transport}')...")
 
     temp_dir = Path(tempfile.mkdtemp(prefix="codex-setup-"))
     print(f"Using temporary directory: {temp_dir}")
@@ -94,15 +227,24 @@ def download_codex_packages(version: str) -> Tuple[Path, List[Path]]:
 
     # Older releases bundled all targets in @openai/codex-sdk. Keep this path for
     # backwards compatibility.
-    sdk_spec = f"@openai/codex-sdk@{version}"
-    sdk_pack = run_command(["npm", "pack", sdk_spec], cwd=temp_dir, check=False)
-    if sdk_pack.returncode == 0:
-        sdk_tgz = next(temp_dir.glob("openai-codex-sdk-*.tgz"), None)
-        if sdk_tgz is not None:
-            sdk_package_dir = extract_tarball(sdk_tgz, temp_dir / "codex-sdk")
-            if (sdk_package_dir / "vendor").exists():
-                print(f"Found vendored binaries in {sdk_spec}")
-                package_dirs.append(sdk_package_dir)
+    legacy_package = "@openai/codex-sdk"
+    legacy_tarball: Optional[Path] = None
+    if transport == "npm":
+        sdk_spec = f"{legacy_package}@{version}"
+        sdk_pack = run_command(["npm", "pack", sdk_spec], cwd=temp_dir, check=False)
+        if sdk_pack.returncode == 0:
+            legacy_tarball = next(temp_dir.glob("openai-codex-sdk-*.tgz"), None)
+    else:
+        print(f"Trying legacy bundle {legacy_package}@{version} via registry API...")
+        legacy_tarball = _download_tarball_from_registry(
+            legacy_package, version, temp_dir
+        )
+
+    if legacy_tarball is not None:
+        sdk_package_dir = extract_tarball(legacy_tarball, temp_dir / "codex-sdk")
+        if (sdk_package_dir / "vendor").exists():
+            print(f"Found vendored binaries in {legacy_package}@{version}")
+            package_dirs.append(sdk_package_dir)
 
     if package_dirs:
         return temp_dir, package_dirs
@@ -112,27 +254,43 @@ def download_codex_packages(version: str) -> Tuple[Path, List[Path]]:
         "(new packaging format)."
     )
     for target, suffix in TARGET_TO_SUFFIX.items():
-        spec = f"@openai/codex@{version}-{suffix}"
-        print(f"Downloading {spec} for {target}")
-        packed = run_command(["npm", "pack", spec], cwd=temp_dir, check=False)
-        if packed.returncode != 0:
-            print(
-                "WARNING: npm pack failed for "
-                f"{target} ({suffix}); skipping this target."
-            )
-            if packed.stderr:
-                print(packed.stderr.strip())
-            continue
-        tarball = temp_dir / f"openai-codex-{version}-{suffix}.tgz"
-        if not tarball.exists():
-            matches = list(temp_dir.glob(f"openai-codex-*{suffix}.tgz"))
-            if len(matches) != 1:
+        package_name = "@openai/codex"
+        package_version = f"{version}-{suffix}"
+        print(f"Downloading {package_name}@{package_version} for {target}")
+
+        tarball: Optional[Path] = None
+        if transport == "npm":
+            spec = f"{package_name}@{package_version}"
+            packed = run_command(["npm", "pack", spec], cwd=temp_dir, check=False)
+            if packed.returncode != 0:
                 print(
-                    "WARNING: Could not locate tarball for "
+                    "WARNING: npm pack failed for "
                     f"{target} ({suffix}); skipping this target."
                 )
+                if packed.stderr:
+                    print(packed.stderr.strip())
                 continue
-            tarball = matches[0]
+            tarball = temp_dir / f"openai-codex-{version}-{suffix}.tgz"
+            if not tarball.exists():
+                matches = list(temp_dir.glob(f"openai-codex-*{suffix}.tgz"))
+                if len(matches) != 1:
+                    print(
+                        "WARNING: Could not locate tarball for "
+                        f"{target} ({suffix}); skipping this target."
+                    )
+                    continue
+                tarball = matches[0]
+        else:
+            tarball = _download_tarball_from_registry(
+                package_name, package_version, temp_dir
+            )
+            if tarball is None:
+                print(
+                    "WARNING: No registry tarball found for "
+                    f"{package_name}@{package_version}; skipping this target."
+                )
+                continue
+
         package_dir = extract_tarball(tarball, temp_dir / f"platform-{suffix}")
         vendor_dir = package_dir / "vendor"
         if not vendor_dir.exists():
@@ -297,6 +455,8 @@ def main():
     print("Codex Python SDK Setup")
     print("=" * 40)
     print()
+    transport = get_transport()
+    print(f"Transport mode: {transport}")
 
     # Get the SDK directory (where this script is located)
     sdk_dir = Path(__file__).resolve().parent.parent
@@ -305,12 +465,12 @@ def main():
     temp_dir = None
     try:
         # Check dependencies
-        if not check_dependencies():
+        if not check_dependencies(transport):
             return 1
 
         # Resolve target version and download vendor packages
-        version = resolve_codex_version()
-        temp_dir, package_dirs = download_codex_packages(version)
+        version = resolve_codex_version(transport)
+        temp_dir, package_dirs = download_codex_packages(version, transport)
 
         # Setup vendor directory
         vendor_dir = setup_vendor_directory(package_dirs, sdk_dir)
@@ -329,9 +489,9 @@ def main():
     except Exception as e:
         print(f"\nERROR: Setup failed: {e}")
         print("\nTroubleshooting:")
-        print("1. Make sure you have Node.js and npm installed")
+        print("1. Verify network connectivity to registry.npmjs.org")
         print("2. Check your internet connection")
-        print("3. Try running: conda install nodejs")
+        print("3. For npm-based download mode, set CODEX_SETUP_TRANSPORT=npm")
         return 1
     finally:
         if temp_dir is not None:
