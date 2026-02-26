@@ -40,6 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -48,6 +53,9 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --locked --all-extras --dev
+
+      - name: Download Codex CLI binaries for tests
+        run: uv run python scripts/setup_binary.py
 
       - name: Test
         run: uv run pytest --cov=codex_sdk --cov-report=term-missing
