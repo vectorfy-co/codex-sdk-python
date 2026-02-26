@@ -1053,6 +1053,31 @@ async def test_codex_model_close_closes_owned_app_server(monkeypatch):
         )
 
 
+@pytest.mark.asyncio
+async def test_codex_model_close_does_not_close_external_app_server():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-external",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("hi")])], None, params)
+    assert app.start_calls >= 1
+
+    await model.close()
+    assert app.close_calls == 0
+
+    with pytest.raises(CodexError, match="closed"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("again")])], None, params
+        )
+
+
 def test_codex_model_rejects_invalid_profile_values():
     with pytest.raises(CodexError, match="performance_profile"):
         CodexModel(performance_profile="fast")

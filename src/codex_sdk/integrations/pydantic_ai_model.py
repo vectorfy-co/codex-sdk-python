@@ -17,7 +17,7 @@ import json
 import logging
 from base64 import b64encode
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional, Sequence
@@ -772,31 +772,30 @@ class CodexModel(Model):
         self, thread_options: Optional[ThreadOptions]
     ) -> ThreadOptions:
         """Apply model-provider defaults to thread options."""
-        if thread_options is None:
-            thread_options = ThreadOptions()
+        options = replace(thread_options) if thread_options is not None else ThreadOptions()
 
-        if thread_options.skip_git_repo_check is None:
-            thread_options.skip_git_repo_check = True
-        if thread_options.sandbox_mode is None:
-            thread_options.sandbox_mode = "read-only"
-        if thread_options.approval_policy is None:
-            thread_options.approval_policy = "never"
+        if options.skip_git_repo_check is None:
+            options.skip_git_repo_check = True
+        if options.sandbox_mode is None:
+            options.sandbox_mode = "read-only"
+        if options.approval_policy is None:
+            options.approval_policy = "never"
         if (
-            thread_options.web_search_mode is None
-            and thread_options.web_search_enabled is None
-            and thread_options.web_search_cached_enabled is None
+            options.web_search_mode is None
+            and options.web_search_enabled is None
+            and options.web_search_cached_enabled is None
         ):
-            thread_options.web_search_mode = "disabled"
-        if thread_options.network_access_enabled is None:
-            thread_options.network_access_enabled = False
+            options.web_search_mode = "disabled"
+        if options.network_access_enabled is None:
+            options.network_access_enabled = False
 
         if (
             self._performance_profile == "max"
-            and thread_options.model_reasoning_effort is None
+            and options.model_reasoning_effort is None
         ):
-            thread_options.model_reasoning_effort = "minimal"
+            options.model_reasoning_effort = "minimal"
 
-        return thread_options
+        return options
 
     def _resolve_app_server_options(
         self,
