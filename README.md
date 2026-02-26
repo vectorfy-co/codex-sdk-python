@@ -157,7 +157,7 @@ python examples/pydantic_ai_run_stream_compat.py
 | ------- | ----------------- | ----------- |
 | `Codex` + `Thread` | `codex exec --experimental-json` (JSONL over stdio) | Conversational turns, streaming item events, structured output (`run_json` / `run_pydantic`). |
 | `AppServerClient` | `codex app-server` (JSON-RPC over stdio) | Full app-server protocol: thread management, turn sessions, approvals, account/config/skills APIs. |
-| `CodexModel` (PydanticAI provider) | `Thread.run_json(...)` on top of `codex exec` | Tool-call planning + optional final text via strict JSON envelope. |
+| `CodexModel` (PydanticAI provider) | `codex app-server` (JSON-RPC over stdio) | Tool-call planning + text generation through app-server turn sessions with incremental stream events. |
 | `codex_handoff_tool` (PydanticAI tool) | `Thread.run(...)` on top of `codex exec` | Delegate repository-aware tasks from another model to Codex. |
 
 <a id="configuration"></a>
@@ -641,6 +641,9 @@ Additional controls:
 
 This SDK offers two ways to integrate with PydanticAI:
 
+Note: starting in `0.105.0`, `CodexModel` is app-server-only and no longer supports
+the legacy `CodexModel(codex=...)` fallback path.
+
 ### 1) Codex as a PydanticAI model provider
 
 Use `CodexModel` to delegate tool-call planning and text generation to Codex, while PydanticAI executes tools and validates outputs.
@@ -668,12 +671,20 @@ print(result.output)
 ```
 
 How it works:
+- `CodexModel` keeps a persistent app-server session and starts/reuses threads based on
+  `thread_reuse_mode` (`"run"` by default, `"always"` optional).
 - `CodexModel` builds a JSON schema envelope with `tool_calls` and `final`.
 - Codex emits tool calls as JSON strings; PydanticAI runs them.
 - If `allow_text_output` is true, Codex can place final text in `final`.
-- Streaming APIs (`Agent.run_stream(...)`, `Agent.run_stream_events()`, `Agent.run_stream_sync()`)
-  are supported for compatibility; response parts are emitted after the underlying `run_json(...)`
-  turn completes (not token-by-token from Codex).
+- Streaming APIs emit incremental events while app-server turn notifications arrive.
+
+Provider options:
+- `performance_profile`: `"balanced"` (default) or `"max"`.
+- `thread_reuse_mode`: `"run"` (default) or `"always"`.
+
+Lifecycle:
+- `CodexModel` owns an app-server client by default; call `await model.close()` in
+  long-lived processes to release resources.
 
 Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`
@@ -746,7 +757,8 @@ flowchart LR
     U[User Code]
     T[Codex + Thread API]
     A[AppServerClient API]
-    M[PydanticAI Integrations]
+    PM[PydanticAI CodexModel]
+    PH[PydanticAI codex_handoff_tool]
   end
 
   subgraph SDK[Codex SDK]
@@ -766,10 +778,11 @@ flowchart LR
 
   U --> T --> C --> E --> X
   U --> A --> R --> S
-  U --> M
-  M --> C
+  U --> PM --> R
+  U --> PH --> C
   X -->|JSONL events| P --> T
   S -->|JSON-RPC messages| R --> A
+  S -->|JSON-RPC messages| R --> PM
   X --> FS
   X --> NET
   S --> FS
@@ -827,15 +840,13 @@ sequenceDiagram
 sequenceDiagram
   participant Agent as PydanticAI Agent
   participant Model as CodexModel
-  participant SDK as Codex SDK
-  participant CLI as codex exec
+  participant App as Codex app-server
   participant Tools as User Tools
 
   Agent->>Model: request(messages, tools)
-  Model->>SDK: start_thread + run_json(prompt, output_schema)
-  SDK->>CLI: codex exec --output-schema
-  CLI-->>SDK: JSON envelope {tool_calls, final}
-  SDK-->>Model: ParsedTurn
+  Model->>App: thread/start (if needed)
+  Model->>App: turn/session(input + output_schema envelope)
+  App-->>Model: item/updated + turn/completed notifications
   alt tool_calls present
     Model-->>Agent: ToolCallPart(s)
     Agent->>Tools: execute tool(s)
@@ -861,7 +872,7 @@ flowchart LR
 
 - `Thread.run_streamed()` and `Thread.run_streamed_events()` stream incremental `ThreadEvent` values as JSONL lines arrive from `codex exec`.
 - `AppServerClient.notifications()` streams incremental JSON-RPC notifications from `codex app-server`.
-- `CodexModel.request_stream(...)` exposes a stream-compatible interface for PydanticAI, but events are emitted from an already-completed `run_json(...)` result.
+- `CodexModel.request_stream(...)` emits incremental events from app-server turn notifications, with compatibility handling for current and legacy PydanticAI stream interfaces.
 
 <a id="testing"></a>
 ## ![Testing](https://img.shields.io/badge/Testing-Pytest%20%26%20Coverage-2563eb?style=for-the-badge&logo=pytest&logoColor=white)

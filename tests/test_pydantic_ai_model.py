@@ -1,5 +1,6 @@
 import dataclasses
 import importlib
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -11,20 +12,28 @@ pydantic = pytest.importorskip("pydantic")
 pytest.importorskip("pydantic_ai", exc_type=ImportError)
 BaseModel = pydantic.BaseModel
 
-from codex_sdk.events import Usage
+from codex_sdk.app_server import AppServerNotification, AppServerOptions
+from codex_sdk.exceptions import CodexError, TurnFailedError
 from codex_sdk.integrations.pydantic_ai_model import (
     CodexModel,
     CodexStreamedResponse,
     _build_envelope_schema,
+    _extract_json_object,
+    _extract_turn_failure_message,
+    _extract_turn_text,
+    _extract_usage_from_turn,
     _final_from_envelope,
+    _is_envelope_candidate,
     _json_dumps,
     _jsonable,
+    _notification_items,
     _render_message_history,
     _render_tool_definitions,
+    _to_int,
     _tool_calls_from_envelope,
+    _usage_from_mapping,
 )
-from codex_sdk.options import CodexOptions
-from codex_sdk.thread import ParsedTurn, Turn
+from codex_sdk.options import CodexOptions, ThreadOptions
 
 messages = importlib.import_module("pydantic_ai.messages")
 models = importlib.import_module("pydantic_ai.models")
@@ -48,32 +57,8 @@ ToolDefinition = tools.ToolDefinition
 RequestUsage = importlib.import_module("pydantic_ai.usage").RequestUsage
 
 
-class FakeThread:
-    def __init__(self, output):
-        self._output = output
-        self.id = "thread-123"
-        self.last_prompt = None
-        self.last_schema = None
-
-    async def run_json(self, prompt, *, output_schema, turn_options=None):
-        self.last_prompt = prompt
-        self.last_schema = output_schema
-        turn = Turn(
-            items=[],
-            final_response="",
-            usage=Usage(input_tokens=1, cached_input_tokens=2, output_tokens=3),
-        )
-        return ParsedTurn(turn=turn, output=self._output)
-
-
-class FakeCodex:
-    def __init__(self, thread):
-        self._thread = thread
-        self.last_thread_options = None
-
-    def start_thread(self, options=None):
-        self.last_thread_options = options
-        return self._thread
+def _envelope_json(output):
+    return json.dumps(output, separators=(",", ":"))
 
 
 @pytest.mark.asyncio
@@ -84,9 +69,16 @@ async def test_codex_model_returns_tool_calls():
         ],
         "final": "",
     }
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-tools",
+            "usage": {"inputTokens": 1, "cachedInputTokens": 2, "outputTokens": 3},
+            "finalResponse": _envelope_json(output),
+        },
+        thread_id="thread-123",
+    )
+    model = CodexModel(app_server=app)
 
     messages = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(
@@ -115,11 +107,8 @@ async def test_codex_model_returns_tool_calls():
     assert response.usage.output_tokens == 3
     assert response.usage.details == {"cached_input_tokens": 2}
 
-    # Schema should restrict tool names
-    enum = thread.last_schema["properties"]["tool_calls"]["items"]["properties"][
-        "name"
-    ]["enum"]
-    assert enum == ["add"]
+    prompt = app.turn_session_calls[0]["input"]
+    assert '"enum":["add"]' in prompt
 
 
 def test_render_tool_definitions_renders_optional_tool_fields() -> None:
@@ -158,8 +147,14 @@ def test_codex_model_does_not_override_explicit_thread_options() -> None:
     """Cover CodexModel.__init__ branches when thread options are preconfigured."""
     profiles = importlib.import_module("pydantic_ai.profiles")
 
-    thread = FakeThread({"tool_calls": [], "final": "ok"})
-    codex = FakeCodex(thread)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-explicit",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "ok"}),
+        },
+    )
     thread_options = importlib.import_module("codex_sdk.options").ThreadOptions(
         skip_git_repo_check=False,
         sandbox_mode="workspace-write",
@@ -169,7 +164,7 @@ def test_codex_model_does_not_override_explicit_thread_options() -> None:
     )
 
     profile = profiles.ModelProfile(supports_tools=False)
-    model = CodexModel(codex=codex, thread_options=thread_options, profile=profile)
+    model = CodexModel(app_server=app, thread_options=thread_options, profile=profile)
 
     assert model.model_name == "codex"
     assert thread_options.skip_git_repo_check is False
@@ -182,17 +177,14 @@ def test_codex_model_does_not_override_explicit_thread_options() -> None:
 @pytest.mark.asyncio
 async def test_codex_model_usage_defaults_when_thread_usage_missing() -> None:
     """Cover the branch where turn.usage is None and we return minimal usage."""
-
-    class FakeThreadNoUsage(FakeThread):
-        async def run_json(self, prompt, *, output_schema, turn_options=None):
-            self.last_prompt = prompt
-            self.last_schema = output_schema
-            turn = Turn(items=[], final_response="", usage=None)
-            return ParsedTurn(turn=turn, output={"tool_calls": [], "final": "hi"})
-
-    thread = FakeThreadNoUsage({"tool_calls": [], "final": "hi"})
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-no-usage",
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hi"}),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     reqs = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
@@ -205,9 +197,15 @@ async def test_codex_model_usage_defaults_when_thread_usage_missing() -> None:
 @pytest.mark.asyncio
 async def test_codex_model_request_without_history() -> None:
     """Cover the prompt path where message history is empty."""
-    thread = FakeThread({"tool_calls": [], "final": "hello"})
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-empty-history",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hello"}),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
     response = await model.request([], None, params)
@@ -218,9 +216,15 @@ async def test_codex_model_request_without_history() -> None:
 @pytest.mark.asyncio
 async def test_codex_model_returns_text_when_allowed():
     output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-text",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json(output),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     messages = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
@@ -234,9 +238,15 @@ async def test_codex_model_returns_text_when_allowed():
 @pytest.mark.asyncio
 async def test_codex_model_omits_text_when_not_allowed():
     output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-no-text",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json(output),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     messages = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(output_mode="tool", allow_text_output=False)
@@ -246,9 +256,15 @@ async def test_codex_model_omits_text_when_not_allowed():
 
 
 def test_model_name_and_system_properties():
-    thread = FakeThread({"tool_calls": [], "final": ""})
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex, system="custom")
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-system",
+            "usage": {"inputTokens": 0, "outputTokens": 0},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": ""}),
+        },
+    )
+    model = CodexModel(app_server=app, system="custom")
     assert model.model_name == "codex"
     assert model.system == "custom"
 
@@ -458,9 +474,15 @@ def test_render_message_history_handles_non_callable_tool_return_and_retry():
 @pytest.mark.asyncio
 async def test_codex_model_includes_tool_manifest_and_history_in_prompt():
     output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-manifest",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json(output),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     messages = [
         ModelRequest(
@@ -499,17 +521,24 @@ async def test_codex_model_includes_tool_manifest_and_history_in_prompt():
     )
 
     await model.request(messages, None, params)
-    assert "Function tools:" in thread.last_prompt
-    assert "Output tools" in thread.last_prompt
-    assert "Conversation so far:" in thread.last_prompt
+    prompt = app.turn_session_calls[0]["input"]
+    assert "Function tools:" in prompt
+    assert "Output tools" in prompt
+    assert "Conversation so far:" in prompt
 
 
 @pytest.mark.asyncio
 async def test_codex_model_request_stream_yields_response():
-    output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-stream-response",
+            "usage": {"inputTokens": 1, "cachedInputTokens": 2, "outputTokens": 3},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hello"}),
+        },
+        thread_id="thread-123",
+    )
+    model = CodexModel(app_server=app)
 
     messages = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
@@ -528,10 +557,15 @@ async def test_codex_model_request_stream_yields_response():
 
 @pytest.mark.asyncio
 async def test_codex_model_request_stream_accepts_run_context_argument():
-    output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-run-context",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hello"}),
+        },
+    )
+    model = CodexModel(app_server=app)
 
     messages = [ModelRequest(parts=[UserPromptPart("hi")])]
     params = ModelRequestParameters(output_mode="text", allow_text_output=True)
@@ -548,8 +582,8 @@ async def test_codex_model_request_stream_accepts_run_context_argument():
 @pytest.mark.asyncio
 async def test_agent_run_stream_passes_run_context_to_codex_model():
     class CapturingCodexModel(CodexModel):
-        def __init__(self, *, codex):
-            super().__init__(codex=codex)
+        def __init__(self, *, app_server):
+            super().__init__(app_server=app_server)
             self.last_run_context = None
 
         @asynccontextmanager
@@ -569,10 +603,15 @@ async def test_agent_run_stream_passes_run_context_to_codex_model():
             ) as streamed:
                 yield streamed
 
-    output = {"tool_calls": [], "final": "hello"}
-    thread = FakeThread(output)
-    codex = FakeCodex(thread)
-    model = CapturingCodexModel(codex=codex)
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-agent-run-context",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hello"}),
+        },
+    )
+    model = CapturingCodexModel(app_server=app)
     agent = Agent(model=model, output_type=str)
 
     async with agent.run_stream("hi") as result:
@@ -584,6 +623,11 @@ async def test_agent_run_stream_passes_run_context_to_codex_model():
 
 def test_codex_model_can_construct_codex_from_options():
     CodexModel(codex_options=CodexOptions(codex_path_override="codex-binary"))
+
+
+def test_codex_model_rejects_legacy_codex_argument():
+    with pytest.raises(TypeError):
+        CodexModel(**{"codex": object()})
 
 
 @pytest.mark.asyncio
@@ -607,3 +651,528 @@ async def test_streamed_response_emits_tool_calls_and_skips_unknown_parts():
     events = [event async for event in resp]
     assert events
     assert resp.provider_url is None
+
+
+@pytest.mark.asyncio
+async def test_streamed_response_supports_iterator_text_delta_api(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Accept both old (single-event) and new (iterator) text-delta manager APIs."""
+    resp = CodexStreamedResponse(
+        model_request_parameters=ModelRequestParameters(
+            output_mode="text",
+            allow_text_output=True,
+        ),
+        model_name="m",
+        provider_name="openai",
+        parts=[TextPart("hello")],
+        thread_id="thread-123",
+        usage=RequestUsage(),
+    )
+
+    original_handle_text_delta = resp._parts_manager.handle_text_delta
+
+    def _iterator_handle_text_delta(*, vendor_part_id, content):
+        result = original_handle_text_delta(
+            vendor_part_id=vendor_part_id,
+            content=content,
+        )
+        if hasattr(result, "event_kind"):
+            return iter([result])
+        return result
+
+    monkeypatch.setattr(
+        resp._parts_manager, "handle_text_delta", _iterator_handle_text_delta
+    )
+
+    events = [event async for event in resp]
+
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    model_response = resp.get()
+    assert len(model_response.parts) == 1
+    assert isinstance(model_response.parts[0], TextPart)
+    assert model_response.parts[0].content == "hello"
+
+
+class FakeAppServerTurnSession:
+    def __init__(self, notifications, final_turn):
+        self._notifications = list(notifications)
+        self._final_turn = dict(final_turn)
+
+    async def notifications(self):
+        for notification in self._notifications:
+            yield notification
+
+    async def wait(self):
+        return self._final_turn
+
+
+class FakeAppServerClient:
+    def __init__(self, *, notifications, final_turn, thread_id="thread-app"):
+        self._notifications = list(notifications)
+        self._final_turn = dict(final_turn)
+        self._thread_id = thread_id
+        self.start_calls = 0
+        self.close_calls = 0
+        self.thread_start_calls = []
+        self.turn_session_calls = []
+
+    async def start(self):
+        self.start_calls += 1
+
+    async def close(self):
+        self.close_calls += 1
+
+    async def thread_start(self, **params):
+        self.thread_start_calls.append(dict(params))
+        return {"thread": {"id": self._thread_id}}
+
+    async def turn_session(self, thread_id, input, **params):
+        self.turn_session_calls.append(
+            {"thread_id": thread_id, "input": input, "params": dict(params)}
+        )
+        return FakeAppServerTurnSession(self._notifications, self._final_turn)
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_path_uses_app_server_and_returns_tool_calls():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-1",
+            "usage": {"inputTokens": 4, "cachedInputTokens": 1, "outputTokens": 2},
+            "finalResponse": (
+                '{"tool_calls":[{"id":"call_1","name":"add","arguments":"{\\"a\\":1,\\"b\\":2}"}],'
+                '"final":""}'
+            ),
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    response = await model.request(
+        [ModelRequest(parts=[UserPromptPart("calculate")])],
+        None,
+        ModelRequestParameters(
+            output_mode="tool",
+            allow_text_output=False,
+            function_tools=[
+                ToolDefinition(
+                    name="add",
+                    description="add two numbers",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "integer"},
+                            "b": {"type": "integer"},
+                        },
+                        "required": ["a", "b"],
+                        "additionalProperties": False,
+                    },
+                )
+            ],
+        ),
+    )
+
+    assert app.start_calls >= 1
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 1
+    assert response.provider_details == {"thread_id": "thread-app"}
+    assert response.usage.input_tokens == 4
+    assert response.usage.cache_read_tokens == 1
+    assert response.usage.output_tokens == 2
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], ToolCallPart)
+    assert response.parts[0].tool_name == "add"
+    assert response.parts[0].tool_call_id == "call_1"
+    assert response.parts[0].args == '{"a":1,"b":2}'
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_stream_emits_incremental_text_deltas():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hel"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hello"}},
+            ),
+        ],
+        final_turn={
+            "id": "turn-2",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+            "finalResponse": "hello",
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        events = [event async for event in streamed]
+        response = streamed.get()
+
+    assert app.start_calls >= 1
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 1
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_stream_reconciles_with_most_recent_item_update():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "a"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m2", "type": "agent_message", "text": "b"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "abc"}},
+            ),
+        ],
+        final_turn={
+            "id": "turn-reconcile",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+            "finalResponse": "abcd",
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        _ = [event async for event in streamed]
+        response = streamed.get()
+
+    assert [part.content for part in response.parts if isinstance(part, TextPart)] == [
+        "abcd",
+        "b",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_run_reuse_mode_resets_on_equal_history_length():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-run",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("alpha")])], None, params)
+    await model.request([ModelRequest(parts=[UserPromptPart("beta")])], None, params)
+
+    assert len(app.thread_start_calls) == 2
+    assert len(app.turn_session_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_codex_model_always_reuse_mode_reuses_on_equal_history_length():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-always",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app, thread_reuse_mode="always")
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("alpha")])], None, params)
+    await model.request([ModelRequest(parts=[UserPromptPart("beta")])], None, params)
+
+    assert len(app.thread_start_calls) == 1
+    assert len(app.turn_session_calls) == 2
+
+
+def test_app_server_helpers_handle_edge_cases():
+    assert _extract_json_object('{"tool_calls":[],"final":"ok"}') == {
+        "tool_calls": [],
+        "final": "ok",
+    }
+    assert _extract_json_object('prefix {"tool_calls":[],"final":"ok"} suffix') == {
+        "tool_calls": [],
+        "final": "ok",
+    }
+    assert _extract_json_object("not-json") is None
+
+    assert _is_envelope_candidate({"tool_calls": []})
+    assert _is_envelope_candidate({"final": ""})
+    assert not _is_envelope_candidate([])
+
+    assert _to_int(None) == 0
+    assert _to_int("3") == 3
+    assert _to_int("not-an-int") == 0
+
+    usage = _usage_from_mapping({"input_tokens": "2", "outputTokens": 4})
+    assert usage is not None
+    assert usage.input_tokens == 2
+    assert usage.output_tokens == 4
+    assert usage.cache_read_tokens == 0
+
+    usage_from_turn = _extract_usage_from_turn({"tokenUsage": {"inputTokens": 1}})
+    assert usage_from_turn is not None
+    assert usage_from_turn.input_tokens == 1
+
+    assert _extract_turn_text({"output": {"final": "done"}}) == "done"
+    assert (
+        _extract_turn_text(
+            {"items": [{"type": "agentMessage", "content": "from-agent-message"}]}
+        )
+        == "from-agent-message"
+    )
+    assert _extract_turn_text(None) == ""
+
+    notification = AppServerNotification(
+        method="item/updated",
+        params={
+            "item": {"id": "a", "type": "agent_message", "text": "x"},
+            "items": [{"id": "b", "type": "agent_message", "text": "y"}],
+            "turn": {
+                "item": {"id": "c", "type": "agent_message", "text": "z"},
+                "items": [{"id": "d", "type": "agent_message", "text": "w"}],
+            },
+        },
+    )
+    assert [item["id"] for item in _notification_items(notification)] == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
+
+    failure = AppServerNotification(
+        method="turn/failed",
+        params={"error": {"message": "boom"}},
+    )
+    assert _extract_turn_failure_message(failure) == "boom"
+
+    fallback_failure = AppServerNotification(method="turn/failed", params={})
+    assert _extract_turn_failure_message(fallback_failure) == "Turn failed"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_default_stream_falls_back_to_final_turn_text():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-fallback",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "hello-from-final-turn",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        events = [event async for event in streamed]
+        response = streamed.get()
+
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello-from-final-turn"
+
+
+@pytest.mark.asyncio
+async def test_codex_model_stream_raises_turn_failed_error():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="turn/failed",
+                params={"error": {"message": "approval denied"}},
+            )
+        ],
+        final_turn={
+            "id": "turn-failed",
+            "usage": {"inputTokens": 1, "outputTokens": 0},
+            "finalResponse": "",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    with pytest.raises(TurnFailedError, match="approval denied"):
+        async with model.request_stream(
+            [ModelRequest(parts=[UserPromptPart("fail")])], None, params
+        ) as streamed:
+            _ = [event async for event in streamed]
+
+
+@pytest.mark.asyncio
+async def test_codex_model_close_closes_owned_app_server(monkeypatch):
+    created = []
+
+    class OwnedFakeAppServer(FakeAppServerClient):
+        def __init__(self, options):
+            super().__init__(
+                notifications=[],
+                final_turn={
+                    "id": "turn-owned",
+                    "usage": {"inputTokens": 1, "outputTokens": 1},
+                    "finalResponse": "ok",
+                },
+            )
+            self.options = options
+            created.append(self)
+
+    module = importlib.import_module("codex_sdk.integrations.pydantic_ai_model")
+    monkeypatch.setattr(module, "AppServerClient", OwnedFakeAppServer)
+
+    model = CodexModel(app_server_options=AppServerOptions())
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    await model.request([ModelRequest(parts=[UserPromptPart("hi")])], None, params)
+
+    assert created and created[0].start_calls >= 1
+
+    await model.close()
+    assert created[0].close_calls == 1
+
+    with pytest.raises(CodexError, match="closed"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("again")])], None, params
+        )
+
+
+@pytest.mark.asyncio
+async def test_codex_model_close_does_not_close_external_app_server():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-external",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("hi")])], None, params)
+    assert app.start_calls >= 1
+
+    await model.close()
+    assert app.close_calls == 0
+
+    with pytest.raises(CodexError, match="closed"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("again")])], None, params
+        )
+
+
+def test_codex_model_rejects_invalid_profile_values():
+    with pytest.raises(CodexError, match="performance_profile"):
+        CodexModel(performance_profile="fast")
+
+    with pytest.raises(CodexError, match="thread_reuse_mode"):
+        CodexModel(thread_reuse_mode="sometimes")
+
+
+@pytest.mark.asyncio
+async def test_codex_model_thread_start_params_include_extended_options():
+    thread_options = ThreadOptions(
+        model="gpt-5",
+        sandbox_mode="workspace-write",
+        working_directory="/tmp",
+        skip_git_repo_check=False,
+        model_instructions_file="/tmp/instructions.md",
+        model_personality="friendly",
+        max_threads=3,
+        network_access_enabled=True,
+        web_search_mode="live",
+        web_search_enabled=True,
+        web_search_cached_enabled=True,
+        shell_snapshot_enabled=True,
+        background_terminals_enabled=True,
+        apply_patch_freeform_enabled=True,
+        exec_policy_enabled=True,
+        remote_models_enabled=True,
+        collaboration_modes_enabled=True,
+        connectors_enabled=True,
+        responses_websockets_enabled=True,
+        request_compression_enabled=True,
+        feature_overrides={"experimental": True},
+        approval_policy="on-request",
+        additional_directories=["/tmp/a", "/tmp/b"],
+        config_overrides={"feature": "on"},
+    )
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-opts",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(
+        app_server=app,
+        thread_options=thread_options,
+        performance_profile="max",
+    )
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("opts")])], None, params)
+
+    sent = app.thread_start_calls[0]
+    assert sent["model"] == "gpt-5"
+    assert sent["cwd"] == "/tmp"
+    assert sent["sandbox_mode"] == "workspace-write"
+    assert sent["skip_git_repo_check"] is False
+    assert sent["model_instructions_file"] == "/tmp/instructions.md"
+    assert sent["model_personality"] == "friendly"
+    assert sent["max_threads"] == 3
+    assert sent["network_access_enabled"] is True
+    assert sent["web_search_mode"] == "live"
+    assert sent["web_search_enabled"] is True
+    assert sent["web_search_cached_enabled"] is True
+    assert sent["shell_snapshot_enabled"] is True
+    assert sent["background_terminals_enabled"] is True
+    assert sent["apply_patch_freeform_enabled"] is True
+    assert sent["exec_policy_enabled"] is True
+    assert sent["remote_models_enabled"] is True
+    assert sent["collaboration_modes_enabled"] is True
+    assert sent["connectors_enabled"] is True
+    assert sent["responses_websockets_enabled"] is True
+    assert sent["request_compression_enabled"] is True
+    assert sent["feature_overrides"] == {"experimental": True}
+    assert sent["approval_policy"] == "on-request"
+    assert sent["additional_directories"] == ["/tmp/a", "/tmp/b"]
+    assert sent["config_overrides"] == {"feature": "on"}
+
+
+@pytest.mark.asyncio
+async def test_codex_model_raises_when_thread_start_missing_id():
+    class MissingIdAppServer(FakeAppServerClient):
+        async def thread_start(self, **params):
+            self.thread_start_calls.append(dict(params))
+            return {"thread": {}}
+
+    app = MissingIdAppServer(
+        notifications=[],
+        final_turn={"id": "turn", "usage": {"inputTokens": 1, "outputTokens": 1}},
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    with pytest.raises(CodexError, match="thread/start response missing thread id"):
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart("oops")])], None, params
+        )

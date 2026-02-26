@@ -4,6 +4,21 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 
 ## [Unreleased]
 
+### Breaking
+- `CodexModel` is now app-server-only for PydanticAI model-provider requests.
+- Removed the legacy `CodexModel(codex=...)` fallback execution path.
+
+### Added
+- `CodexModel.close()` to release owned app-server resources explicitly.
+- `CodexModel.performance_profile` (`"balanced"` or `"max"`).
+- `CodexModel.thread_reuse_mode` (`"run"` or `"always"`).
+
+### Fixed
+- `CodexModel.request_stream(...)` now emits incremental stream events during
+  app-server turn processing.
+- Stream compatibility for both legacy and newer PydanticAI
+  `handle_text_delta(...)` return styles.
+
 ## [0.105.0] - 2026-02-26
 
 ### Fixed
