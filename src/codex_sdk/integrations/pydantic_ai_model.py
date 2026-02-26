@@ -1224,4 +1224,5 @@ class CodexModel(Model):
                     try:
                         await task
                     except asyncio.CancelledError:
+                        # Expected when cancelling the background task during cleanup; safe to ignore.
                         pass
