@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 TARGET_TO_SUFFIX = {
@@ -28,6 +28,40 @@ TARGET_TO_SUFFIX = {
 }
 
 NPM_REGISTRY_URL = "https://registry.npmjs.org"
+
+
+def _resolve_network_timeout_seconds() -> float:
+    """Resolve timeout for network requests, defaulting to 30 seconds."""
+    raw = os.environ.get("CODEX_SETUP_NETWORK_TIMEOUT_SECONDS", "30").strip()
+    try:
+        timeout = float(raw)
+    except ValueError:
+        print(
+            "WARNING: Invalid CODEX_SETUP_NETWORK_TIMEOUT_SECONDS="
+            f"{raw!r}; falling back to 30."
+        )
+        return 30.0
+    if timeout <= 0:
+        print(
+            "WARNING: CODEX_SETUP_NETWORK_TIMEOUT_SECONDS must be > 0; "
+            "falling back to 30."
+        )
+        return 30.0
+    return timeout
+
+
+NETWORK_TIMEOUT_SECONDS = _resolve_network_timeout_seconds()
+
+
+def _validate_https_url(url: str, *, source: str) -> None:
+    """Ensure URL uses https and includes a host."""
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme != "https" or not parsed.netloc:
+        raise RuntimeError(
+            f"Refusing {source} from unsupported URL {url!r}. "
+            "Only absolute https URLs are allowed."
+        )
 
 
 def get_transport() -> str:
@@ -45,16 +79,27 @@ def get_transport() -> str:
 def _registry_json(path: str) -> dict:
     """Fetch and decode JSON from the npm registry."""
     url = f"{NPM_REGISTRY_URL}/{path.lstrip('/')}"
+    _validate_https_url(url, source="registry metadata request")
     request = Request(url, headers={"Accept": "application/json"})
-    with urlopen(request) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError:
+        raise
+    except URLError as exc:
+        raise RuntimeError(f"Failed to fetch registry metadata from {url}") from exc
 
 
 def _download_file(url: str, destination: Path) -> None:
     """Download a URL to a destination path."""
+    _validate_https_url(url, source="file download")
     request = Request(url)
-    with urlopen(request) as response, destination.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    try:
+        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            with destination.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+    except URLError as exc:
+        raise RuntimeError(f"Failed to download file from {url}") from exc
 
 
 def _download_tarball_from_registry(
@@ -154,7 +199,9 @@ def resolve_codex_version(transport: str) -> str:
     latest = _registry_json(f"{quote('@openai/codex', safe='')}/latest")
     version = latest.get("version", "").strip()
     if not version:
-        raise RuntimeError("Could not resolve @openai/codex latest version from registry")
+        raise RuntimeError(
+            "Could not resolve @openai/codex latest version from registry"
+        )
     print(f"Resolved @openai/codex version: {version}")
     return version
 
