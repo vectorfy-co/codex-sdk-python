@@ -1217,6 +1217,7 @@ class CodexModel(Model):
             task = asyncio.create_task(_runner())
             try:
                 yield streamed
+                # Ensure completion and propagate any exception from the runner task.
                 await task
             finally:
                 if not task.done():

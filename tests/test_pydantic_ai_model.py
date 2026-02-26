@@ -627,7 +627,7 @@ def test_codex_model_can_construct_codex_from_options():
 
 def test_codex_model_rejects_legacy_codex_argument():
     with pytest.raises(TypeError):
-        CodexModel(codex=object())  # type: ignore[call-arg]
+        CodexModel(**{"codex": object()})
 
 
 @pytest.mark.asyncio
