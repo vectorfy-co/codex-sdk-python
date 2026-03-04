@@ -558,7 +558,6 @@ class AppServerClient:
         model_providers: Optional[Sequence[str]] = None,
         source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
-        cwd: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
@@ -571,7 +570,6 @@ class AppServerClient:
             source_kinds: Filter threads by one or more source kinds.
             archived: If set, restrict results to archived (`True`) or unarchived (`False`)
                 threads.
-            cwd: Optional working directory scope for server-side filtering.
 
         Returns:
             The raw response dictionary returned by the app-server for the `thread/list`
@@ -590,8 +588,6 @@ class AppServerClient:
             params["source_kinds"] = list(source_kinds)
         if archived is not None:
             params["archived"] = archived
-        if cwd is not None:
-            params["cwd"] = str(cwd)
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
 
     async def thread_read(
@@ -612,6 +608,10 @@ class AppServerClient:
             The app-server's response payload for the archive operation.
         """
         return await self._request_dict("thread/archive", {"threadId": thread_id})
+
+    async def thread_unsubscribe(self, thread_id: str) -> Dict[str, Any]:
+        """Unsubscribe from notifications for a previously loaded thread."""
+        return await self._request_dict("thread/unsubscribe", {"threadId": thread_id})
 
     async def thread_name_set(self, thread_id: str, *, name: str) -> Dict[str, Any]:
         """
@@ -640,41 +640,14 @@ class AppServerClient:
         """
         return await self._request_dict("thread/unarchive", {"threadId": thread_id})
 
-    async def thread_compact_start(
-        self, thread_id: str, *, instructions: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def thread_compact_start(self, thread_id: str) -> Dict[str, Any]:
         """
         Starts a compaction operation for the specified thread on the app-server.
-
-        Args:
-            thread_id: Identifier of the thread to compact.
-            instructions: Optional server hint for compaction behavior.
 
         Returns:
             dict: The app-server's result payload for the compaction start request.
         """
-        payload: Dict[str, Any] = {"thread_id": thread_id}
-        if instructions is not None:
-            payload["instructions"] = instructions
-        return await self._request_dict("thread/compact/start", _coerce_keys(payload))
-
-    async def thread_background_terminals_clean(
-        self, thread_id: str, *, terminal_ids: Sequence[str]
-    ) -> Dict[str, Any]:
-        """
-        Clean up background terminal sessions for a thread.
-
-        Args:
-            thread_id: Identifier of the thread.
-            terminal_ids: Terminal ids to clean.
-
-        Returns:
-            App-server response payload.
-        """
-        payload = {"thread_id": thread_id, "terminal_ids": list(terminal_ids)}
-        return await self._request_dict(
-            "thread/backgroundTerminals/clean", _coerce_keys(payload)
-        )
+        return await self._request_dict("thread/compact/start", {"threadId": thread_id})
 
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
@@ -772,110 +745,69 @@ class AppServerClient:
             payload["cwds"] = [str(path) for path in cwds]
         return await self._request_dict("skills/list", _coerce_keys(payload))
 
-    async def skills_remote_read(
-        self,
-        *,
-        cwds: Optional[Sequence[Union[str, Path]]] = None,
-        enabled: Optional[bool] = None,
-        hazelnut_scope: Optional[str] = None,
-        product_surface: Optional[str] = None,
-        params: Optional["SkillsRemoteReadRequest"] = None,
-    ) -> Dict[str, Any]:
+    async def skills_remote_read(self) -> Dict[str, Any]:
+        """
+        Backward-compatible alias for `skills_remote_list`.
+
+        Returns:
+            result (Dict[str, Any]): The app-server response payload for the `skills/remote/list` request.
+        """
+        return await self.skills_remote_list()
+
+    async def skills_remote_list(self) -> Dict[str, Any]:
         """
         Read remote skills metadata from the app server.
 
-        Args:
-            cwds: Optional workspace roots to scope the remote skill listing.
-            enabled: Optional filter for enabled/disabled remote skills.
-            hazelnut_scope: Optional Hazelnut scope identifier.
-            product_surface: Optional product surface identifier.
-            params: Optional raw request payload for protocol-forward fields.
-
         Returns:
-            result (Dict[str, Any]): The app-server response payload for the `skills/remote/read` request.
+            result (Dict[str, Any]): The app-server response payload for the `skills/remote/list` request.
         """
-        payload: Dict[str, Any] = {}
-        if params is not None:
-            _validate_alias_conflicts(
-                params,
-                (
-                    ("hazelnut_scope", "hazelnutScope"),
-                    ("product_surface", "productSurface"),
-                ),
-                context="SkillsRemoteReadRequest",
-            )
-            payload.update(dict(params))
-        if cwds is not None:
-            payload["cwds"] = [str(path) for path in cwds]
-        if enabled is not None:
-            payload["enabled"] = enabled
-        if hazelnut_scope is not None:
-            payload["hazelnut_scope"] = hazelnut_scope
-        if product_surface is not None:
-            payload["product_surface"] = product_surface
-        return await self._request_dict("skills/remote/read", _coerce_keys(payload))
+        return await self._request_dict("skills/remote/list", {})
 
     async def skills_remote_write(
-        self,
-        *,
-        hazelnut_id: Optional[str] = None,
-        is_preload: Optional[bool] = None,
-        params: Optional["SkillsRemoteWriteRequest"] = None,
+        self, *, hazelnut_id: str, is_preload: bool
     ) -> Dict[str, Any]:
         """
-        Start a remote skill write operation.
+        Backward-compatible alias for `skills_remote_export`.
 
         Args:
-            hazelnut_id: Optional Hazelnut identifier.
-            is_preload: Optional preload flag.
-            params: Optional raw request payload.
+            hazelnut_id: Identifier of the remote Hazelnut skill to export.
+            is_preload: Whether the skill should be marked as a preload.
 
         Returns:
-            Result returned by the app-server for the "skills/remote/write" request.
+            Result returned by the app-server for the `skills/remote/export` request.
         """
-        payload: Dict[str, Any] = {}
-        if params is not None:
-            _validate_alias_conflicts(
-                params,
-                (
-                    ("hazelnut_id", "hazelnutId"),
-                    ("is_preload", "isPreload"),
-                ),
-                context="SkillsRemoteWriteRequest",
-            )
-            payload.update(dict(params))
-        if hazelnut_id is not None:
-            payload["hazelnut_id"] = hazelnut_id
-        if is_preload is not None:
-            payload["is_preload"] = is_preload
-        return await self._request_dict("skills/remote/write", _coerce_keys(payload))
+        return await self.skills_remote_export(
+            hazelnut_id=hazelnut_id, is_preload=is_preload
+        )
 
-    async def skills_config_write(
-        self,
-        *,
-        path: Optional[str] = None,
-        enabled: Optional[bool] = None,
-        params: Optional["SkillsConfigWriteRequest"] = None,
+    async def skills_remote_export(
+        self, *, hazelnut_id: str, is_preload: bool
     ) -> Dict[str, Any]:
         """
-        Set skill configuration state.
+        Start a remote skill export operation for a Hazelnut package.
 
         Args:
-            path: Optional configuration path identifying the skill.
-            enabled: Optional enabled state for the skill.
-            params: Optional typed request payload for evolving protocol fields.
+            hazelnut_id: Identifier of the remote Hazelnut skill to export.
+            is_preload: Whether the skill should be marked as a preload.
+
+        Returns:
+            Result returned by the app-server for the `skills/remote/export` request.
+        """
+        payload = {"hazelnut_id": hazelnut_id, "is_preload": is_preload}
+        return await self._request_dict("skills/remote/export", _coerce_keys(payload))
+
+    async def skills_config_write(self, *, path: str, enabled: bool) -> Dict[str, Any]:
+        """
+        Set the enabled state of a skill configuration at the given path.
+
+        Args:
+            path: The configuration path identifying the skill.
+            enabled: True to enable the skill at the path, False to disable it.
 
         Returns:
             The app-server response as a dictionary.
         """
-        # TODO(app-server-schema): tighten request shape after protocol stabilizes.
-        payload: Dict[str, Any] = {}
-        if params is not None:
-            payload.update(_coerce_keys(dict(params)))
-        if path is not None:
-            payload["path"] = path
-        if enabled is not None:
-            payload["enabled"] = enabled
+        payload = {"path": path, "enabled": enabled}
         return await self._request_dict("skills/config/write", payload)
 
     async def turn_start(
@@ -900,6 +832,33 @@ class AppServerClient:
         payload = {"threadId": thread_id, "input": normalize_app_server_input(input)}
         payload.update(_coerce_keys(params))
         return await self._request_dict("turn/start", payload)
+
+    async def turn_steer(
+        self,
+        thread_id: str,
+        expected_turn_id: str,
+        input: AppServerInput,
+        **params: Any,
+    ) -> Dict[str, Any]:
+        """
+        Steer an active turn by injecting additional input into the same turn.
+
+        Args:
+            thread_id: Identifier of the thread containing the active turn.
+            expected_turn_id: Active turn id precondition.
+            input: User input to inject into the running turn.
+            **params: Additional optional request parameters.
+
+        Returns:
+            The app-server's response payload for the `turn/steer` request.
+        """
+        payload = {
+            "threadId": thread_id,
+            "expectedTurnId": expected_turn_id,
+            "input": normalize_app_server_input(input),
+        }
+        payload.update(_coerce_keys(params))
+        return await self._request_dict("turn/steer", payload)
 
     async def review_start(
         self,
@@ -946,23 +905,6 @@ class AppServerClient:
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
         )
 
-    async def turn_steer(
-        self, thread_id: str, turn_id: str, *, prompt: str
-    ) -> Dict[str, Any]:
-        """
-        Send steering guidance to an in-progress turn.
-
-        Args:
-            thread_id: Identifier of the thread.
-            turn_id: Identifier of the turn.
-            prompt: Steering prompt text.
-
-        Returns:
-            App-server response payload.
-        """
-        payload = {"thread_id": thread_id, "turn_id": turn_id, "prompt": prompt}
-        return await self._request_dict("turn/steer", _coerce_keys(payload))
-
     async def model_list(
         self,
         *,
@@ -981,7 +923,12 @@ class AppServerClient:
         return await self._request_dict("model/list", _coerce_keys(params) or None)
 
     async def app_list(
-        self, *, cursor: Optional[str] = None, limit: Optional[int] = None
+        self,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        force_refetch: Optional[bool] = None,
+        thread_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """List apps/connectors available to the app-server."""
         params: Dict[str, Any] = {}
@@ -989,31 +936,26 @@ class AppServerClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return await self._request_dict("app/list", params or None)
-
-    async def collaboration_mode_list(self) -> Dict[str, Any]:
-        """List supported collaboration modes from the app-server."""
-        return await self._request_dict("collaborationMode/list", {})
+        if force_refetch is not None:
+            params["force_refetch"] = force_refetch
+        if thread_id is not None:
+            params["thread_id"] = thread_id
+        return await self._request_dict("app/list", _coerce_keys(params) or None)
 
     async def experimental_feature_list(
         self, *, cursor: Optional[str] = None, limit: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        List experimental features available from the app-server.
-
-        Args:
-            cursor: Optional pagination cursor.
-            limit: Optional page size.
-
-        Returns:
-            App-server response payload.
-        """
+        """List experimental features available to the app-server."""
         params: Dict[str, Any] = {}
         if cursor is not None:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
         return await self._request_dict("experimentalFeature/list", params or None)
+
+    async def collaboration_mode_list(self) -> Dict[str, Any]:
+        """List supported collaboration modes from the app-server."""
+        return await self._request_dict("collaborationMode/list", {})
 
     async def command_exec(
         self,
@@ -1057,6 +999,37 @@ class AppServerClient:
             params["limit"] = limit
         return await self._request_dict("mcpServerStatus/list", params or None)
 
+    async def external_agent_config_detect(
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        include_home: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Detect importable external-agent configuration sources."""
+        params: Dict[str, Any] = {}
+        if cwds is not None:
+            params["cwds"] = [str(path) for path in cwds]
+        if include_home is not None:
+            params["include_home"] = include_home
+        return await self._request_dict(
+            "externalAgentConfig/detect", _coerce_keys(params) or None
+        )
+
+    async def external_agent_config_import(
+        self, *, migration_items: Sequence[Mapping[str, Any]]
+    ) -> Dict[str, Any]:
+        """Import selected external-agent configuration items."""
+        params = {
+            "migration_items": [_coerce_keys(dict(item)) for item in migration_items]
+        }
+        return await self._request_dict(
+            "externalAgentConfig/import", _coerce_keys(params)
+        )
+
+    async def windows_sandbox_setup_start(self, *, mode: str) -> Dict[str, Any]:
+        """Start Windows sandbox setup in the selected mode."""
+        return await self._request_dict("windowsSandbox/setupStart", {"mode": mode})
+
     async def account_login_start(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
         """Start an account login flow via the app-server."""
         return await self._request_dict("account/login/start", dict(params))
@@ -1078,103 +1051,6 @@ class AppServerClient:
         return await self._request_dict(
             "account/read", {"refreshToken": refresh_token} if refresh_token else None
         )
-
-    async def account_chatgpt_auth_tokens_refresh(
-        self, *, params: Mapping[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Refresh ChatGPT auth tokens via the app-server.
-
-        Args:
-            params: Refresh payload (snake_case or camelCase keys are accepted).
-
-        Returns:
-            App-server response payload.
-        """
-        return await self._request_dict(
-            "account/chatgptAuthTokens/refresh", _coerce_keys(dict(params))
-        )
-
-    async def item_tool_call(self, *, params: "ItemToolCallRequest") -> Dict[str, Any]:
-        """
-        Send an item tool-call payload.
-
-        Args:
-            params: Typed request payload for `item/tool/call`.
-
-        Returns:
-            App-server response payload.
-        """
-        # TODO(app-server-schema): tighten request shape after protocol stabilizes.
-        return await self._request_dict("item/tool/call", _coerce_keys(dict(params)))
-
-    async def item_tool_request_user_input(
-        self, *, params: Mapping[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Send an item request-user-input payload.
-
-        Args:
-            params: Request payload for `item/tool/requestUserInput`.
-
-        Returns:
-            App-server response payload.
-        """
-        return await self._request_dict(
-            "item/tool/requestUserInput", _coerce_keys(dict(params))
-        )
-
-    async def item_command_execution_request_approval(
-        self, *, params: Mapping[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Send an item command-execution approval payload.
-
-        Args:
-            params: Request payload for `item/commandExecution/requestApproval`.
-
-        Returns:
-            App-server response payload.
-        """
-        return await self._request_dict(
-            "item/commandExecution/requestApproval", _coerce_keys(dict(params))
-        )
-
-    async def item_file_change_request_approval(
-        self, *, params: Mapping[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Send an item file-change approval payload.
-
-        Args:
-            params: Request payload for `item/fileChange/requestApproval`.
-
-        Returns:
-            App-server response payload.
-        """
-        return await self._request_dict(
-            "item/fileChange/requestApproval", _coerce_keys(dict(params))
-        )
-
-    async def mock_experimental_method(
-        self, *, params: Optional[Mapping[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Call a mock experimental app-server endpoint.
-
-        Args:
-            params: Optional request payload.
-
-        Returns:
-            App-server response payload.
-        """
-        if not self._options.experimental_api_enabled:
-            raise CodexError(
-                "`mock/experimentalMethod` requires "
-                "AppServerOptions(experimental_api_enabled=True)."
-            )
-        payload = _coerce_keys(dict(params)) if params is not None else {}
-        return await self._request_dict("mock/experimentalMethod", payload)
 
     async def feedback_upload(
         self,
@@ -1347,46 +1223,6 @@ class AppServerSkillInput(TypedDict):
     path: str
 
 
-class SkillsConfigWriteRequest(TypedDict, total=False):
-    """Typed payload for `skills/config/write` requests."""
-
-    path: str
-    enabled: bool
-    mode: str
-
-
-class SkillsRemoteReadRequest(TypedDict, total=False):
-    """Typed payload for `skills/remote/read` requests."""
-
-    cwds: List[str]
-    enabled: bool
-    hazelnut_scope: str
-    hazelnutScope: str
-    product_surface: str
-    productSurface: str
-
-
-class SkillsRemoteWriteRequest(TypedDict, total=False):
-    """Typed payload for `skills/remote/write` requests."""
-
-    hazelnut_id: str
-    hazelnutId: str
-    is_preload: bool
-    isPreload: bool
-
-
-class ItemToolCallRequest(TypedDict, total=False):
-    """Typed payload for `item/tool/call` requests."""
-
-    name: str
-    tool_name: str
-    toolName: str
-    tool_call_id: str
-    toolCallId: str
-    arguments: Mapping[str, Any]
-    args: Mapping[str, Any]
-
-
 AppServerUserInput = Union[
     AppServerTextInput,
     AppServerImageInput,
@@ -1456,21 +1292,6 @@ def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
             key = _snake_to_camel(key)
         coerced[key] = value
     return coerced
-
-
-def _validate_alias_conflicts(
-    params: Mapping[str, Any],
-    alias_pairs: Sequence[tuple[str, str]],
-    *,
-    context: str,
-) -> None:
-    """Reject payloads that provide both snake_case and camelCase aliases."""
-    for snake_case_key, camel_case_key in alias_pairs:
-        if snake_case_key in params and camel_case_key in params:
-            raise CodexError(
-                f"{context} received both '{snake_case_key}' and "
-                f"'{camel_case_key}'. Provide only one key variant."
-            )
 
 
 def _snake_to_camel(value: str) -> str:

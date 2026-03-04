@@ -15,8 +15,6 @@ from .app_server import (
     AppServerRequest,
     AppServerTurnSession,
     AppServerUserInput,
-    SkillsRemoteReadRequest,
-    SkillsRemoteWriteRequest,
 )
 from .codex import Codex
 from .events import (
@@ -43,6 +41,11 @@ from .exceptions import (
 from .hooks import ThreadHooks
 from .items import (
     AgentMessageItem,
+    CollabAgentState,
+    CollabAgentStatus,
+    CollabTool,
+    CollabToolCallItem,
+    CollabToolCallStatus,
     CommandExecutionItem,
     CommandExecutionStatus,
     ErrorItem,
@@ -79,7 +82,7 @@ from .thread import (
     Turn,
 )
 
-__version__ = "0.105.0"
+__version__ = "0.107.0"
 
 __all__ = [
     "AbortController",
@@ -94,8 +97,6 @@ __all__ = [
     "ApprovalDecisions",
     "AppServerInput",
     "AppServerUserInput",
-    "SkillsRemoteReadRequest",
-    "SkillsRemoteWriteRequest",
     "Thread",
     "ThreadHooks",
     "Input",
@@ -121,6 +122,7 @@ __all__ = [
     "CommandExecutionItem",
     "FileChangeItem",
     "McpToolCallItem",
+    "CollabToolCallItem",
     "McpToolCallItemResult",
     "McpToolCallItemError",
     "WebSearchItem",
@@ -130,6 +132,10 @@ __all__ = [
     "PatchChangeKind",
     "PatchApplyStatus",
     "McpToolCallStatus",
+    "CollabToolCallStatus",
+    "CollabTool",
+    "CollabAgentStatus",
+    "CollabAgentState",
     "TodoItem",
     "CodexOptions",
     "ThreadOptions",

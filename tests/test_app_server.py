@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 from typing import Any, List, Optional
 
@@ -15,11 +16,10 @@ from codex_sdk.app_server import (
     _extract_turn,
     _iter_lines,
     _normalize_decision,
-    _validate_alias_conflicts,
     normalize_app_server_input,
 )
 from codex_sdk.exceptions import CodexAppServerError, CodexError
-from codex_sdk.exec import INTERNAL_ORIGINATOR_ENV
+from codex_sdk.exec import INTERNAL_ORIGINATOR_ENV, PYTHON_SDK_ORIGINATOR
 
 
 class QueueStream:
@@ -94,6 +94,7 @@ async def test_app_server_initialize_and_request(
 
     init_request = json.loads(process.stdin.writes[0].decode("utf-8"))
     assert init_request["method"] == "initialize"
+    assert "capabilities" not in init_request.get("params", {})
 
     stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
     await start_task
@@ -115,6 +116,83 @@ async def test_app_server_initialize_and_request(
     assert notification is not None
     assert notification.method == "thread/started"
 
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_close_skips_terminate_when_process_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the subprocess already exited, close() should not try to terminate it."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    # Pretend the process already exited.
+    process.returncode = 0
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_initialize_with_experimental_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(
+        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
+    )
+    await client.start()
+
+    init_task = asyncio.create_task(client.initialize())
+    await asyncio.sleep(0)
+    init_request = json.loads(process.stdin.writes[-1].decode("utf-8"))
+    assert init_request["method"] == "initialize"
+    assert init_request["params"]["capabilities"] == {"experimentalApi": True}
+
+    stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
+    await init_task
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_initialize_starts_process_when_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """initialize() should start the subprocess when called before start()."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    init_task = asyncio.create_task(client.initialize())
+    await asyncio.sleep(0)
+    stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
+    result = await init_task
+    assert result["userAgent"] == "codex"
     await client.close()
 
 
@@ -164,9 +242,7 @@ async def test_app_server_notify_and_respond(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
-    client = AppServerClient(
-        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
-    )
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
     await client.start()
 
     await client.notify("ping", {"ok": True})
@@ -200,26 +276,6 @@ async def test_app_server_notify_and_respond(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_mock_experimental_method_requires_experimental_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stdout = QueueStream()
-    process = FakeProcess(stdout)
-
-    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
-    client = AppServerClient(AppServerOptions(auto_initialize=False))
-    await client.start()
-
-    with pytest.raises(CodexError):
-        await client.mock_experimental_method(params={"ok": True})
-
-    await client.close()
-
-
-@pytest.mark.asyncio
 async def test_app_server_methods_and_input_normalization(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -230,9 +286,7 @@ async def test_app_server_methods_and_input_normalization(
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
-    client = AppServerClient(
-        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
-    )
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
     await client.start()
 
     async def expect_request(task: asyncio.Task, expected_method: str, result: Any):
@@ -258,6 +312,11 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "thread/loaded/list", {"data": ["t1"]})
     assert payload["params"] == {"cursor": "c", "limit": 1}
 
+    # Cover the empty-params branch (params should be omitted).
+    task = asyncio.create_task(client.thread_loaded_list())
+    _, payload = await expect_request(task, "thread/loaded/list", {"data": []})
+    assert "params" not in payload
+
     task = asyncio.create_task(client.config_requirements_read())
     _, payload = await expect_request(
         task, "configRequirements/read", {"requirements": None}
@@ -276,33 +335,39 @@ async def test_app_server_methods_and_input_normalization(
     assert isinstance(sent_input[1]["path"], str)
     assert isinstance(sent_input[2]["path"], str)
 
+    task = asyncio.create_task(
+        client.turn_steer("t1", "turn_1", [{"type": "text", "text": "continue"}])
+    )
+    _, payload = await expect_request(task, "turn/steer", {"turn": {"id": "turn_1"}})
+    assert payload["params"]["threadId"] == "t1"
+    assert payload["params"]["expectedTurnId"] == "turn_1"
+
     task = asyncio.create_task(client.turn_interrupt("t1", "turn_1"))
     _, payload = await expect_request(task, "turn/interrupt", {})
     assert payload["params"] == {"threadId": "t1", "turnId": "turn_1"}
-
-    task = asyncio.create_task(client.turn_steer("t1", "turn_1", prompt="be concise"))
-    _, payload = await expect_request(task, "turn/steer", {})
-    assert payload["params"] == {
-        "threadId": "t1",
-        "turnId": "turn_1",
-        "prompt": "be concise",
-    }
 
     task = asyncio.create_task(
         client.thread_list(
             cursor="c2",
             limit=2,
+            sort_key="updated_at",
             model_providers=["openai"],
+            source_kinds=["cli"],
             archived=True,
-            cwd=tmp_path,
         )
     )
     _, payload = await expect_request(
         task, "thread/list", {"data": [], "nextCursor": None}
     )
+    assert payload["params"]["sortKey"] == "updated_at"
     assert payload["params"]["modelProviders"] == ["openai"]
+    assert payload["params"]["sourceKinds"] == ["cli"]
     assert payload["params"]["archived"] is True
-    assert payload["params"]["cwd"] == str(tmp_path)
+
+    # Cover thread_list with no filters (params should be omitted).
+    task = asyncio.create_task(client.thread_list())
+    _, payload = await expect_request(task, "thread/list", {"data": []})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.thread_read("t1", include_turns=True))
     _, payload = await expect_request(task, "thread/read", {"thread": {"id": "t1"}})
@@ -312,27 +377,23 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "thread/archive", {})
     assert payload["params"] == {"threadId": "t1"}
 
-    task = asyncio.create_task(client.thread_unarchive("t1"))
-    _, payload = await expect_request(task, "thread/unarchive", {})
+    task = asyncio.create_task(client.thread_unsubscribe("t1"))
+    _, payload = await expect_request(task, "thread/unsubscribe", {})
     assert payload["params"] == {"threadId": "t1"}
 
-    task = asyncio.create_task(client.thread_name_set("t1", name="Renamed"))
-    _, payload = await expect_request(task, "thread/name/set", {"thread": {"id": "t1"}})
-    assert payload["params"] == {"threadId": "t1", "name": "Renamed"}
+    task = asyncio.create_task(client.thread_name_set("t1", name="hello"))
+    _, payload = await expect_request(task, "thread/name/set", {})
+    assert payload["params"] == {"threadId": "t1", "name": "hello"}
 
-    task = asyncio.create_task(
-        client.thread_compact_start("t1", instructions="summarize")
-    )
-    _, payload = await expect_request(task, "thread/compact/start", {"ok": True})
-    assert payload["params"] == {"threadId": "t1", "instructions": "summarize"}
-
-    task = asyncio.create_task(
-        client.thread_background_terminals_clean("t1", terminal_ids=["s1"])
-    )
+    task = asyncio.create_task(client.thread_unarchive("t1"))
     _, payload = await expect_request(
-        task, "thread/backgroundTerminals/clean", {"ok": True}
+        task, "thread/unarchive", {"thread": {"id": "t1"}}
     )
-    assert payload["params"] == {"threadId": "t1", "terminalIds": ["s1"]}
+    assert payload["params"] == {"threadId": "t1"}
+
+    task = asyncio.create_task(client.thread_compact_start("t1"))
+    _, payload = await expect_request(task, "thread/compact/start", {})
+    assert payload["params"] == {"threadId": "t1"}
 
     task = asyncio.create_task(client.thread_rollback("t1", num_turns=2))
     _, payload = await expect_request(task, "thread/rollback", {"thread": {"id": "t1"}})
@@ -370,6 +431,35 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "skills/list", {"data": []})
     assert payload["params"]["forceReload"] is True
 
+    # Cover skills_list without cwds.
+    task = asyncio.create_task(client.skills_list(force_reload=False))
+    _, payload = await expect_request(task, "skills/list", {"data": []})
+    assert payload["params"] == {"forceReload": False}
+
+    task = asyncio.create_task(client.skills_remote_read())
+    _, payload = await expect_request(task, "skills/remote/list", {"data": []})
+    assert payload["params"] == {}
+
+    task = asyncio.create_task(
+        client.skills_remote_write(hazelnut_id="hazelnut_1", is_preload=True)
+    )
+    _, payload = await expect_request(task, "skills/remote/export", {"ok": True})
+    assert payload["params"] == {"hazelnutId": "hazelnut_1", "isPreload": True}
+
+    task = asyncio.create_task(client.skills_remote_list())
+    _, payload = await expect_request(task, "skills/remote/list", {"data": []})
+    assert payload["params"] == {}
+
+    task = asyncio.create_task(
+        client.skills_remote_export(hazelnut_id="hazelnut_1", is_preload=True)
+    )
+    _, payload = await expect_request(task, "skills/remote/export", {"ok": True})
+    assert payload["params"] == {"hazelnutId": "hazelnut_1", "isPreload": True}
+
+    task = asyncio.create_task(client.skills_config_write(path="foo", enabled=True))
+    _, payload = await expect_request(task, "skills/config/write", {"ok": True})
+    assert payload["params"] == {"path": "foo", "enabled": True}
+
     task = asyncio.create_task(
         client.review_start(
             "t1",
@@ -380,29 +470,69 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "review/start", {"turn": {"id": "turn_r"}})
     assert payload["params"]["threadId"] == "t1"
 
+    # Cover review_start without delivery.
     task = asyncio.create_task(
-        client.model_list(cursor="m", limit=1, include_hidden=True)
+        client.review_start("t1", target={"type": "uncommittedChanges"})
     )
+    _, payload = await expect_request(task, "review/start", {"turn": {"id": "turn_r"}})
+    assert payload["params"]["threadId"] == "t1"
+
+    task = asyncio.create_task(client.model_list(cursor="m", limit=1))
     _, payload = await expect_request(task, "model/list", {"data": []})
-    assert payload["params"] == {"cursor": "m", "limit": 1, "includeHidden": True}
+    assert payload["params"] == {"cursor": "m", "limit": 1}
+
+    task = asyncio.create_task(client.model_list(include_hidden=True))
+    _, payload = await expect_request(task, "model/list", {"data": []})
+    assert payload["params"] == {"includeHidden": True}
+
+    # Cover model_list with no cursor/limit.
+    task = asyncio.create_task(client.model_list())
+    _, payload = await expect_request(task, "model/list", {"data": []})
+    assert "params" not in payload
 
     task = asyncio.create_task(client.app_list(cursor="a", limit=2))
     _, payload = await expect_request(task, "app/list", {"data": []})
     assert payload["params"] == {"cursor": "a", "limit": 2}
 
+    task = asyncio.create_task(
+        client.app_list(force_refetch=True, thread_id="t1", limit=5)
+    )
+    _, payload = await expect_request(task, "app/list", {"data": []})
+    assert payload["params"] == {
+        "forceRefetch": True,
+        "threadId": "t1",
+        "limit": 5,
+    }
+
+    # Cover app_list with no cursor/limit.
+    task = asyncio.create_task(client.app_list())
+    _, payload = await expect_request(task, "app/list", {"data": []})
+    assert "params" not in payload
+
+    task = asyncio.create_task(client.experimental_feature_list(limit=5, cursor="e"))
+    _, payload = await expect_request(task, "experimentalFeature/list", {"data": []})
+    assert payload["params"] == {"limit": 5, "cursor": "e"}
+
     task = asyncio.create_task(client.collaboration_mode_list())
     _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
     assert payload["params"] == {}
 
-    task = asyncio.create_task(client.experimental_feature_list(cursor="x", limit=3))
-    _, payload = await expect_request(task, "experimentalFeature/list", {"data": []})
-    assert payload["params"] == {"cursor": "x", "limit": 3}
-
     task = asyncio.create_task(
-        client.command_exec(command=["echo", "hi"], timeout_ms=10, cwd=tmp_path)
+        client.command_exec(
+            command=["echo", "hi"],
+            timeout_ms=10,
+            cwd=tmp_path,
+            sandbox_policy={"allow": True},
+        )
     )
     _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
     assert payload["params"]["command"] == ["echo", "hi"]
+    assert payload["params"]["sandboxPolicy"] == {"allow": True}
+
+    # Cover command_exec with only required args.
+    task = asyncio.create_task(client.command_exec(command=["echo", "hi"]))
+    _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
+    assert payload["params"] == {"command": ["echo", "hi"]}
 
     task = asyncio.create_task(
         client.mcp_server_oauth_login(name="server", scopes=["a"])
@@ -412,6 +542,13 @@ async def test_app_server_methods_and_input_normalization(
     )
     assert payload["params"]["name"] == "server"
 
+    # Cover oauth_login without scopes.
+    task = asyncio.create_task(client.mcp_server_oauth_login(name="server"))
+    _, payload = await expect_request(
+        task, "mcpServer/oauth/login", {"authorizationUrl": "x"}
+    )
+    assert payload["params"] == {"name": "server"}
+
     task = asyncio.create_task(client.mcp_server_refresh())
     _, payload = await expect_request(task, "config/mcpServer/reload", {})
     assert "params" not in payload
@@ -419,6 +556,49 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.mcp_server_status_list(cursor="c", limit=1))
     _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})
     assert payload["params"] == {"cursor": "c", "limit": 1}
+
+    # Cover status list with no params.
+    task = asyncio.create_task(client.mcp_server_status_list())
+    _, payload = await expect_request(task, "mcpServerStatus/list", {"data": []})
+    assert "params" not in payload
+
+    task = asyncio.create_task(
+        client.external_agent_config_detect(cwds=[tmp_path], include_home=True)
+    )
+    _, payload = await expect_request(
+        task, "externalAgentConfig/detect", {"migrationItems": []}
+    )
+    assert payload["params"] == {"cwds": [str(tmp_path)], "includeHome": True}
+
+    task = asyncio.create_task(
+        client.external_agent_config_import(
+            migration_items=[
+                {
+                    "description": "Import AGENTS.md",
+                    "item_type": "AGENTS_MD",
+                    "cwd": str(tmp_path),
+                }
+            ]
+        )
+    )
+    _, payload = await expect_request(
+        task, "externalAgentConfig/import", {"importedItems": []}
+    )
+    assert payload["params"] == {
+        "migrationItems": [
+            {
+                "description": "Import AGENTS.md",
+                "itemType": "AGENTS_MD",
+                "cwd": str(tmp_path),
+            }
+        ]
+    }
+
+    task = asyncio.create_task(client.windows_sandbox_setup_start(mode="elevated"))
+    _, payload = await expect_request(
+        task, "windowsSandbox/setupStart", {"status": "started"}
+    )
+    assert payload["params"] == {"mode": "elevated"}
 
     task = asyncio.create_task(
         client.account_login_start(params={"type": "apiKey", "apiKey": "key"})
@@ -445,84 +625,6 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.account_read(refresh_token=True))
     _, payload = await expect_request(task, "account/read", {"account": {}})
     assert payload["params"]["refreshToken"] is True
-
-    task = asyncio.create_task(
-        client.account_chatgpt_auth_tokens_refresh(params={"refresh_token": "r1"})
-    )
-    _, payload = await expect_request(
-        task, "account/chatgptAuthTokens/refresh", {"tokens": {}}
-    )
-    assert payload["params"] == {"refreshToken": "r1"}
-
-    task = asyncio.create_task(client.skills_config_write(params={"mode": "manual"}))
-    _, payload = await expect_request(task, "skills/config/write", {"ok": True})
-    assert payload["params"] == {"mode": "manual"}
-
-    with pytest.raises(CodexError, match="SkillsRemoteReadRequest"):
-        await client.skills_remote_read(
-            params={"hazelnut_scope": "user", "hazelnutScope": "workspace"}
-        )
-
-    with pytest.raises(CodexError, match="SkillsRemoteWriteRequest"):
-        await client.skills_remote_write(
-            params={"hazelnut_id": "hz_1", "hazelnutId": "hz_2"}
-        )
-
-    task = asyncio.create_task(
-        client.skills_remote_read(
-            cwds=[tmp_path],
-            enabled=True,
-            hazelnut_scope="user",
-            product_surface="codex_desktop",
-        )
-    )
-    _, payload = await expect_request(task, "skills/remote/read", {"data": []})
-    assert payload["params"] == {
-        "cwds": [str(tmp_path)],
-        "enabled": True,
-        "hazelnutScope": "user",
-        "productSurface": "codex_desktop",
-    }
-
-    task = asyncio.create_task(
-        client.skills_remote_write(
-            hazelnut_id="hz_1", params={"skills": [{"name": "s"}]}
-        )
-    )
-    _, payload = await expect_request(task, "skills/remote/write", {"ok": True})
-    assert payload["params"] == {"skills": [{"name": "s"}], "hazelnutId": "hz_1"}
-
-    task = asyncio.create_task(client.item_tool_call(params={"name": "tool_a"}))
-    _, payload = await expect_request(task, "item/tool/call", {"ok": True})
-    assert payload["params"] == {"name": "tool_a"}
-
-    task = asyncio.create_task(
-        client.item_tool_request_user_input(params={"question": "Proceed?"})
-    )
-    _, payload = await expect_request(
-        task, "item/tool/requestUserInput", {"response": "yes"}
-    )
-    assert payload["params"] == {"question": "Proceed?"}
-
-    task = asyncio.create_task(
-        client.item_command_execution_request_approval(params={"decision": "accept"})
-    )
-    _, payload = await expect_request(
-        task, "item/commandExecution/requestApproval", {"ok": True}
-    )
-    assert payload["params"] == {"decision": "accept"}
-
-    task = asyncio.create_task(
-        client.item_file_change_request_approval(params={"decision": "accept"})
-    )
-    _, payload = await expect_request(
-        task, "item/fileChange/requestApproval", {"ok": True}
-    )
-    assert payload["params"] == {"decision": "accept"}
-
-    task = asyncio.create_task(client.mock_experimental_method(params={"ok": True}))
-    _, payload = await expect_request(task, "mock/experimentalMethod", {"ok": True})
-    assert payload["params"] == {"ok": True}
 
     task = asyncio.create_task(
         client.feedback_upload(
@@ -602,6 +704,218 @@ def test_app_server_helpers() -> None:
 
     info = client._default_client_info()
     assert info.name == "codex_sdk_python"
+
+
+def test_app_server_client_defaults_options() -> None:
+    client = AppServerClient()
+    assert isinstance(client._options, AppServerOptions)
+
+
+def test_app_server_build_env_sets_originator_when_missing() -> None:
+    client = AppServerClient(AppServerOptions(env={"X": "1"}))
+    env = client._build_env()
+    assert env["X"] == "1"
+    assert env[INTERNAL_ORIGINATOR_ENV] == PYTHON_SDK_ORIGINATOR
+
+
+def test_normalize_app_server_input_preserves_non_mapping_text_elements() -> None:
+    assert normalize_app_server_input(
+        [
+            {
+                "type": "text",
+                "text": "ok",
+                "text_elements": ["raw-element"],
+            }
+        ]
+    ) == [
+        {
+            "type": "text",
+            "text": "ok",
+            "textElements": ["raw-element"],
+        }
+    ]
+
+
+def test_extract_turn_returns_none_when_missing_turn_and_id() -> None:
+    assert (
+        _extract_turn(AppServerNotification(method="turn/completed", params={})) is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_app_server_reader_loop_skips_blank_lines_and_records_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    stdout.feed("\n")
+    stdout.feed("not json")
+    await asyncio.sleep(0)
+
+    with pytest.raises(CodexError):
+        await client.request("noop")
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_reader_loop_records_unknown_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    stdout.feed("[]")
+    await asyncio.sleep(0)
+
+    with pytest.raises(CodexError):
+        await client.request("noop")
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_reader_loop_exits_on_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover the normal reader-loop shutdown path when stdout closes."""
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    # End the stream (empty bytes) so _iter_lines terminates.
+    stdout._queue.put_nowait(b"")
+    await asyncio.sleep(0)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_app_server_close_fails_pending_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+
+    request_task = asyncio.create_task(client.request("thread/loaded/list"))
+    await asyncio.sleep(0)
+
+    await client.close()
+
+    with pytest.raises(CodexError):
+        await request_task
+
+
+@pytest.mark.asyncio
+async def test_app_server_close_kills_process_on_wait_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TimeoutProcess(FakeProcess):
+        def __init__(self, stdout: QueueStream) -> None:
+            """
+            Initialize the instance with the provided QueueStream as its stdout and set the killed flag to False.
+
+            Parameters:
+                stdout (QueueStream): Stream used to emulate the process's stdout.
+            """
+            super().__init__(stdout)
+            self.killed = False
+
+        def kill(self) -> None:
+            """
+            Terminate the process and record that a kill was requested.
+
+            Sets the instance's `killed` flag to True and then delegates to the superclass `kill` method to perform process termination.
+            """
+            self.killed = True
+            super().kill()
+
+    stdout = QueueStream()
+    process = TimeoutProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        """
+        Helper used in tests to simulate spawning a subprocess by returning a preconfigured FakeProcess.
+
+        Returns:
+            FakeProcess: The fake process instance to be used as the spawned subprocess.
+        """
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    import codex_sdk.app_server as app_server_module
+
+    async def fake_wait_for(awaitable: Any, *_args: Any, **_kwargs: Any) -> None:
+        """
+        Simulate asyncio.wait_for that always times out: schedule the given awaitable as a task, cancel it, and raise asyncio.TimeoutError.
+
+        Parameters:
+            awaitable: A coroutine or awaitable to be scheduled; it will be cancelled.
+            *_args, **_kwargs: Ignored; present for API compatibility.
+        """
+        task = asyncio.create_task(awaitable)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(app_server_module.asyncio, "wait_for", fake_wait_for)
+
+    client = AppServerClient(AppServerOptions(auto_initialize=False))
+    await client.start()
+    await client.close()
+    assert process.killed is True
 
 
 @pytest.mark.asyncio
@@ -805,28 +1119,6 @@ def test_app_server_decision_helpers() -> None:
         _normalize_decision(123, None)  # type: ignore[arg-type]
     with pytest.raises(CodexError):
         _normalize_decision("accept_with_execpolicy_amendment", None)
-
-
-def test_app_server_alias_conflict_validation() -> None:
-    _validate_alias_conflicts(
-        {"hazelnut_scope": "user"},
-        (("hazelnut_scope", "hazelnutScope"),),
-        context="SkillsRemoteReadRequest",
-    )
-
-    with pytest.raises(CodexError, match="SkillsRemoteReadRequest"):
-        _validate_alias_conflicts(
-            {"hazelnut_scope": "user", "hazelnutScope": "workspace"},
-            (("hazelnut_scope", "hazelnutScope"),),
-            context="SkillsRemoteReadRequest",
-        )
-
-    with pytest.raises(CodexError, match="SkillsRemoteWriteRequest"):
-        _validate_alias_conflicts(
-            {"hazelnut_id": "h1", "hazelnutId": "h2"},
-            (("hazelnut_id", "hazelnutId"),),
-            context="SkillsRemoteWriteRequest",
-        )
 
 
 @pytest.mark.asyncio

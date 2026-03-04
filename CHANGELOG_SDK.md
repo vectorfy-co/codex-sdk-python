@@ -2,97 +2,52 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## [Unreleased]
-
-### Breaking
-- `CodexModel` is now app-server-only for PydanticAI model-provider requests.
-- Removed the legacy `CodexModel(codex=...)` fallback execution path.
+## [0.107.0] - 2026-03-04
 
 ### Added
-- `CodexModel.close()` to release owned app-server resources explicitly.
-- `CodexModel.performance_profile` (`"balanced"` or `"max"`).
-- `CodexModel.thread_reuse_mode` (`"run"` or `"always"`).
-
-### Fixed
-- `CodexModel.request_stream(...)` now emits incremental stream events during
-  app-server turn processing.
-- Stream compatibility for both legacy and newer PydanticAI
-  `handle_text_delta(...)` return styles.
-
-## [0.105.0] - 2026-02-26
-
-### Fixed
-- Fix pydantic-ai request_stream compatibility by accepting optional `run_context`
-  in `CodexModel.request_stream(...)`.
-- Add `CodexStreamedResponse.provider_url` for newer pydantic-ai stream interfaces.
+- App-server helpers for newly exposed protocol methods:
+  `thread_unsubscribe`, `turn_steer`, `experimental_feature_list`,
+  `external_agent_config_detect`, `external_agent_config_import`,
+  `windows_sandbox_setup_start`.
+- App/server wrappers for the renamed remote-skill endpoints:
+  `skills_remote_list` and `skills_remote_export`.
 
 ### Updated
-- README architecture and systems documentation now reflects both transport paths:
-  `codex exec --experimental-json` (Thread API) and `codex app-server` (JSON-RPC).
-- README PydanticAI streaming notes now document compatibility semantics (stream
-  interface support with response parts emitted after the underlying JSON turn).
-- README CI/CD and binary setup sections expanded with explicit workflow details and
-  guidance for CI environments that download Codex binaries.
-- CI test workflow now runs `python scripts/setup_binary.py` before pytest, so
-  tests do not require committing updated vendor binaries.
-- `scripts/setup_binary.py` now supports direct registry downloads by default
-  (no npm/Node dependency required), with optional `CODEX_SETUP_TRANSPORT=npm`
-  for npm-pack mode.
-- SDK package version bumped to `0.105.0` (`pyproject.toml`,
-  `codex_sdk.__version__`, README release badge).
+- `skills_remote_read` now maps to `skills/remote/list` and
+  `skills_remote_write` maps to `skills/remote/export` (kept as backward-compatible aliases).
+- `model_list` now accepts `include_hidden`.
+- `app_list` now accepts `force_refetch` and `thread_id` to match upstream gating/cache controls.
+- SDK version set to 0.107.0 to match Codex CLI release.
 
 ### Notes
-- Tested with pydantic-ai-slim versions from `0.8.1` through `1.63.0`
-  (including `1.56.0` and `1.63.0` stream invocation checks).
+- Codex 0.107.0 adds thread forking UX improvements, richer model/app availability metadata,
+  configurable memories, and resume-state fixes for pending approval/input requests.
 
-## [0.104.0] - 2026-02-18
+## [0.98.0] - 2026-02-05
 
 ### Added
-- `AppServerClient.thread_list(...)` now accepts `cwd` for scoped thread queries.
-- `AppServerClient.model_list(...)` now accepts `include_hidden` to request hidden models.
-- `AppServerClient.skills_remote_read(...)` now supports explicit `cwds`, `enabled`,
-  `hazelnut_scope`, and `product_surface` filters and adds typed request helpers.
-- `skills/remote/write` typed payload helper to keep optional legacy
-  `is_preload` compatibility while supporting current protocol usage.
+- Exec event parsing for `collab_tool_call` items (collaboration tool calls).
+- Exec event parsing for `web_search` `action` payloads.
+- Thread option `model_personality="none"` (mirrors app-server personality support).
+- App-server option `experimental_api_enabled` to opt into experimental methods/fields via `initialize.capabilities.experimentalApi=true`.
+- App-server helpers: `thread_name_set`, `thread_unarchive`, `thread_compact_start`,
+  `skills_remote_read`, `skills_remote_write`, and `skills_config_write`.
+- `thread_list` now accepts `sort_key` and `source_kinds`.
 
 ### Updated
-- Bundled Codex CLI vendor binaries updated to `0.104.0` via `scripts/setup_binary.py`.
-- SDK package version bumped to `0.104.0` (`pyproject.toml`, `codex_sdk.__version__`,
-  README release badge).
-- App-server method coverage aligned with upstream `rust-v0.104.0` schema additions
-  (including thread list/model list/remote skills parameters).
-- Existing `thread_list` filters (`archived`, `sort_key`, `source_kinds`) remain
-  unchanged while adding `cwd`.
+- Fixed `codex exec` argument ordering when resuming a thread with `--image` attachments
+  (resume args now precede image args to avoid greedy flag parsing).
+- `max_threads` validation now only enforces `>= 1` (Codex defaults to 6; this is not a hard cap).
+- PydanticAI integration updated for `pydantic-ai` 0.6.x.
+- Fixed `logfire` optional dependency to avoid shadowing Pydantic's Logfire packages in CI,
+  which prevented `pydantic_ai` from importing and caused coverage failures.
+- `scripts/setup_binary.py` now pins the npm download to `@openai/codex-sdk@<pyproject version>`
+  so vendor binaries match the SDK version.
+- Bundled Codex CLI vendor binaries updated to 0.98.0 via `scripts/setup_binary.py`.
+- SDK version set to 0.98.0 to match Codex CLI release.
 
 ### Notes
-- Upstream `rust-v0.104.0` introduces thread archived/unarchived notifications and
-  command approval IDs; the SDK remains compatible because app-server notifications
-  and approval payloads are passed through as structured dictionaries.
-
-## [0.101.0] - 2026-02-15
-
-### Added
-- New app-server wrappers for recently exposed endpoints, including
-  `thread_unarchive`, `thread_name_set`, `thread_compact_start`,
-  `thread_background_terminals_clean`, `turn_steer`, `experimental_feature_list`,
-  `account_chatgpt_auth_tokens_refresh`, `skills_config_write`,
-  `skills_remote_read`/`skills_remote_write`, `item_tool_call`,
-  `item_tool_request_user_input`, `item_command_execution_request_approval`,
-  `item_file_change_request_approval`, and `mock_experimental_method`.
-- New `tool_envelope` module for shared tool-call envelope parsing, normalization,
-  and schema validation utilities used by model-driven tool loops.
-- Pydantic-AI model provider hardening for request/usage/streaming compatibility
-  across API variants, with expanded integration coverage for robust tool-call flows.
-
-### Updated
-- Bundled Codex CLI vendor binaries updated to 0.101.0 via `scripts/setup_binary.py`.
-- SDK version set to 0.101.0 to match the latest published Codex CLI stable release.
-- `scripts/setup_binary.py` now supports the current npm packaging model that ships
-  platform-specific `@openai/codex@<version>-<target>` artifacts.
-
-### Notes
-- Upstream `0.103.0` was not available on public GitHub/npm release channels during this
-  update run; the sync is pinned to the latest published stable (`0.101.0`).
+- Codex 0.98.0 introduces GPT-5.3-Codex (model availability is controlled by your Codex provider).
 
 ## [0.91.0] - 2026-01-27
 
