@@ -24,7 +24,7 @@ def main() -> None:
     model = CodexModel(
         thread_options=ThreadOptions(
             # Pick a model family that doesn't aggressively auto-use Codex tools.
-            model="gpt-5",
+            model="gpt-5.4",
             sandbox_mode="read-only",
             skip_git_repo_check=True,
         )

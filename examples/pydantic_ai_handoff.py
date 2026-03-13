@@ -29,7 +29,7 @@ async def main() -> None:
     )
 
     agent = Agent(
-        "openai:gpt-5",
+        "openai:gpt-5.4",
         tools=[tool],
         system_prompt=(
             "You can delegate implementation details to the `codex_handoff` tool. "

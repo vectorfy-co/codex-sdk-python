@@ -165,7 +165,7 @@ def codex_handoff_tool(
 
     Example:
         tool = codex_handoff_tool(thread_options=ThreadOptions(sandbox_mode='workspace-write'))
-        agent = Agent('openai:gpt-5', tools=[tool])
+        agent = Agent('openai:gpt-5.4', tools=[tool])
     """
     if codex is None:
         codex = Codex(codex_options)

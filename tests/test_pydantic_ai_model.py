@@ -1243,7 +1243,7 @@ def test_codex_model_rejects_invalid_profile_values():
 @pytest.mark.asyncio
 async def test_codex_model_thread_start_params_include_extended_options():
     thread_options = ThreadOptions(
-        model="gpt-5",
+        model="gpt-5.4",
         sandbox_mode="workspace-write",
         working_directory="/tmp",
         skip_git_repo_check=False,
@@ -1286,7 +1286,7 @@ async def test_codex_model_thread_start_params_include_extended_options():
     await model.request([ModelRequest(parts=[UserPromptPart("opts")])], None, params)
 
     sent = app.thread_start_calls[0]
-    assert sent["model"] == "gpt-5"
+    assert sent["model"] == "gpt-5.4"
     assert sent["cwd"] == "/tmp"
     assert sent["sandbox_mode"] == "workspace-write"
     assert sent["skip_git_repo_check"] is False

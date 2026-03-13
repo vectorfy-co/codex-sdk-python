@@ -636,7 +636,7 @@ def add(a: int, b: int) -> int:
 
 model = CodexModel(
     thread_options=ThreadOptions(
-        model="gpt-5",
+        model="gpt-5.4",
         sandbox_mode="read-only",
         skip_git_repo_check=True,
     )
@@ -700,7 +700,7 @@ tool = codex_handoff_tool(
 )
 
 agent = Agent(
-    "openai:gpt-5",
+    "openai:gpt-5.4",
     tools=[tool],
     system_prompt=(
         "You can delegate implementation details to the codex_handoff tool. "

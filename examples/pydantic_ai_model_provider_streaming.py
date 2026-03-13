@@ -25,7 +25,7 @@ from codex_sdk.options import ThreadOptions
 async def main() -> None:
     model = CodexModel(
         thread_options=ThreadOptions(
-            model="gpt-5",
+            model="gpt-5.4",
             sandbox_mode="read-only",
             skip_git_repo_check=True,
         )
