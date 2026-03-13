@@ -170,7 +170,7 @@ async def test_app_server_initialize_with_experimental_capabilities(
     assert init_request["params"]["capabilities"] == {"experimentalApi": True}
 
     stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
-    await init_task
+    _ = await init_task
     await client.close()
 
 
@@ -455,10 +455,52 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"] == {}
 
     task = asyncio.create_task(
+        client.skills_remote_read(
+            cwds=[tmp_path],
+            enabled=True,
+            hazelnut_scope="team",
+            product_surface="desktop",
+        )
+    )
+    _, payload = await expect_request(task, "skills/remote/list", {"data": []})
+    assert payload["params"] == {
+        "cwds": [str(tmp_path)],
+        "enabled": True,
+        "hazelnutScope": "team",
+        "productSurface": "desktop",
+    }
+
+    task = asyncio.create_task(
+        client.skills_remote_read(
+            params={
+                "cwds": [str(tmp_path)],
+                "enabled": False,
+                "hazelnutScope": "global",
+                "productSurface": "cli",
+            }
+        )
+    )
+    _, payload = await expect_request(task, "skills/remote/list", {"data": []})
+    assert payload["params"] == {
+        "cwds": [str(tmp_path)],
+        "enabled": False,
+        "hazelnutScope": "global",
+        "productSurface": "cli",
+    }
+
+    task = asyncio.create_task(
         client.skills_remote_write(hazelnut_id="hazelnut_1", is_preload=True)
     )
     _, payload = await expect_request(task, "skills/remote/export", {"ok": True})
     assert payload["params"] == {"hazelnutId": "hazelnut_1", "isPreload": True}
+
+    task = asyncio.create_task(
+        client.skills_remote_write(
+            params={"hazelnutId": "hazelnut_2", "isPreload": False}
+        )
+    )
+    _, payload = await expect_request(task, "skills/remote/export", {"ok": True})
+    assert payload["params"] == {"hazelnutId": "hazelnut_2", "isPreload": False}
 
     task = asyncio.create_task(client.skills_remote_list())
     _, payload = await expect_request(task, "skills/remote/list", {"data": []})
@@ -473,6 +515,16 @@ async def test_app_server_methods_and_input_normalization(
     task = asyncio.create_task(client.skills_config_write(path="foo", enabled=True))
     _, payload = await expect_request(task, "skills/config/write", {"ok": True})
     assert payload["params"] == {"path": "foo", "enabled": True}
+
+    with pytest.raises(CodexError, match="SkillsRemoteReadRequest received both"):
+        await client.skills_remote_read(
+            params={"hazelnut_scope": "team", "hazelnutScope": "global"}
+        )
+
+    with pytest.raises(CodexError, match="SkillsRemoteWriteRequest received both"):
+        await client.skills_remote_write(
+            params={"hazelnut_id": "hazelnut_1", "hazelnutId": "hazelnut_2"}
+        )
 
     task = asyncio.create_task(
         client.review_start(
@@ -936,7 +988,7 @@ async def test_app_server_close_fails_pending_requests(
     await client.close()
 
     with pytest.raises(CodexError):
-        await request_task
+        _ = await request_task
 
 
 @pytest.mark.asyncio
@@ -977,8 +1029,6 @@ async def test_app_server_close_kills_process_on_wait_timeout(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
-    import codex_sdk.app_server as app_server_module
-
     async def fake_wait_for(awaitable: Any, *_args: Any, **_kwargs: Any) -> None:
         """
         Simulate asyncio.wait_for that always times out: schedule the given awaitable as a task, cancel it, and raise asyncio.TimeoutError.
@@ -990,10 +1040,10 @@ async def test_app_server_close_kills_process_on_wait_timeout(
         task = asyncio.create_task(awaitable)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            _ = await task
         raise asyncio.TimeoutError()
 
-    monkeypatch.setattr(app_server_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
 
     client = AppServerClient(AppServerOptions(auto_initialize=False))
     await client.start()

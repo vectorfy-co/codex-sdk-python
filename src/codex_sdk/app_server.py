@@ -779,14 +779,48 @@ class AppServerClient:
             payload["cwds"] = [str(path) for path in cwds]
         return await self._request_dict("skills/list", _coerce_keys(payload))
 
-    async def skills_remote_read(self) -> Dict[str, Any]:
+    async def skills_remote_read(
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        enabled: Optional[bool] = None,
+        hazelnut_scope: Optional[str] = None,
+        product_surface: Optional[str] = None,
+        params: Optional["SkillsRemoteReadRequest"] = None,
+    ) -> Dict[str, Any]:
         """
         Backward-compatible alias for `skills_remote_list`.
+
+        Args:
+            cwds: Optional workspace roots to scope the remote skill listing.
+            enabled: Optional filter for enabled/disabled remote skills.
+            hazelnut_scope: Optional Hazelnut scope identifier.
+            product_surface: Optional product surface identifier.
+            params: Optional raw request payload for protocol-forward fields.
 
         Returns:
             result (Dict[str, Any]): The app-server response payload for the `skills/remote/list` request.
         """
-        return await self.skills_remote_list()
+        payload: Dict[str, Any] = {}
+        if params is not None:
+            _validate_alias_conflicts(
+                params,
+                (
+                    ("hazelnut_scope", "hazelnutScope"),
+                    ("product_surface", "productSurface"),
+                ),
+                context="SkillsRemoteReadRequest",
+            )
+            payload.update(dict(params))
+        if cwds is not None:
+            payload["cwds"] = [str(path) for path in cwds]
+        if enabled is not None:
+            payload["enabled"] = enabled
+        if hazelnut_scope is not None:
+            payload["hazelnut_scope"] = hazelnut_scope
+        if product_surface is not None:
+            payload["product_surface"] = product_surface
+        return await self._request_dict("skills/remote/list", _coerce_keys(payload))
 
     async def skills_remote_list(self) -> Dict[str, Any]:
         """
@@ -798,21 +832,39 @@ class AppServerClient:
         return await self._request_dict("skills/remote/list", {})
 
     async def skills_remote_write(
-        self, *, hazelnut_id: str, is_preload: bool
+        self,
+        *,
+        hazelnut_id: Optional[str] = None,
+        is_preload: Optional[bool] = None,
+        params: Optional["SkillsRemoteWriteRequest"] = None,
     ) -> Dict[str, Any]:
         """
         Backward-compatible alias for `skills_remote_export`.
 
         Args:
-            hazelnut_id: Identifier of the remote Hazelnut skill to export.
-            is_preload: Whether the skill should be marked as a preload.
+            hazelnut_id: Optional Hazelnut identifier.
+            is_preload: Optional preload flag.
+            params: Optional raw request payload.
 
         Returns:
             Result returned by the app-server for the `skills/remote/export` request.
         """
-        return await self.skills_remote_export(
-            hazelnut_id=hazelnut_id, is_preload=is_preload
-        )
+        payload: Dict[str, Any] = {}
+        if params is not None:
+            _validate_alias_conflicts(
+                params,
+                (
+                    ("hazelnut_id", "hazelnutId"),
+                    ("is_preload", "isPreload"),
+                ),
+                context="SkillsRemoteWriteRequest",
+            )
+            payload.update(dict(params))
+        if hazelnut_id is not None:
+            payload["hazelnut_id"] = hazelnut_id
+        if is_preload is not None:
+            payload["is_preload"] = is_preload
+        return await self._request_dict("skills/remote/export", _coerce_keys(payload))
 
     async def skills_remote_export(
         self, *, hazelnut_id: str, is_preload: bool
@@ -1341,6 +1393,26 @@ class AppServerSkillInput(TypedDict):
     path: str
 
 
+class SkillsRemoteReadRequest(TypedDict, total=False):
+    """Typed payload for legacy `skills_remote_read` alias requests."""
+
+    cwds: List[str]
+    enabled: bool
+    hazelnut_scope: str
+    hazelnutScope: str
+    product_surface: str
+    productSurface: str
+
+
+class SkillsRemoteWriteRequest(TypedDict, total=False):
+    """Typed payload for legacy `skills_remote_write` alias requests."""
+
+    hazelnut_id: str
+    hazelnutId: str
+    is_preload: bool
+    isPreload: bool
+
+
 AppServerUserInput = Union[
     AppServerTextInput,
     AppServerImageInput,
@@ -1412,6 +1484,21 @@ def _coerce_keys(
             key = _snake_to_camel(key)
         coerced[key] = value
     return coerced
+
+
+def _validate_alias_conflicts(
+    params: Mapping[str, Any],
+    alias_pairs: Sequence[tuple[str, str]],
+    *,
+    context: str,
+) -> None:
+    """Reject payloads that provide both snake_case and camelCase aliases."""
+    for snake_case_key, camel_case_key in alias_pairs:
+        if snake_case_key in params and camel_case_key in params:
+            raise CodexError(
+                f"{context} received both '{snake_case_key}' and "
+                f"'{camel_case_key}'. Provide only one key variant."
+            )
 
 
 def _snake_to_camel(value: str) -> str:
