@@ -2,6 +2,13 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.114.1] - 2026-03-13
+
+### Updated
+- Refreshed the PydanticAI integration docs/examples to use `gpt-5.4` for the
+  general OpenAI model examples, matching the current official model guidance.
+- Added a matching regression assertion in the PydanticAI provider test coverage.
+
 ## [0.114.0] - 2026-03-13
 
 ### Added
