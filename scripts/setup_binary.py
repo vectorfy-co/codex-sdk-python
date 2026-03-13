@@ -1,142 +1,20 @@
 #!/usr/bin/env python3
-"""Download and install vendored Codex CLI binaries for the Python SDK.
+"""
+Setup script for the Codex Python SDK.
 
-By default this script downloads package tarballs directly from the npm registry API
-and does not require Node.js/npm.
+This script downloads the real codex binary from the npm package and sets it up
+for use with the Python SDK.
 """
 
 import json
-import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
-
-TARGET_TO_SUFFIX = {
-    "aarch64-apple-darwin": "darwin-arm64",
-    "x86_64-apple-darwin": "darwin-x64",
-    "aarch64-unknown-linux-musl": "linux-arm64",
-    "x86_64-unknown-linux-musl": "linux-x64",
-    "aarch64-pc-windows-msvc": "win32-arm64",
-    "x86_64-pc-windows-msvc": "win32-x64",
-}
-
-NPM_REGISTRY_URL = "https://registry.npmjs.org"
-
-
-def _resolve_network_timeout_seconds() -> float:
-    """Resolve timeout for network requests, defaulting to 30 seconds."""
-    raw = os.environ.get("CODEX_SETUP_NETWORK_TIMEOUT_SECONDS", "30").strip()
-    try:
-        timeout = float(raw)
-    except ValueError:
-        print(
-            "WARNING: Invalid CODEX_SETUP_NETWORK_TIMEOUT_SECONDS="
-            f"{raw!r}; falling back to 30."
-        )
-        return 30.0
-    if timeout <= 0:
-        print(
-            "WARNING: CODEX_SETUP_NETWORK_TIMEOUT_SECONDS must be > 0; "
-            "falling back to 30."
-        )
-        return 30.0
-    return timeout
-
-
-NETWORK_TIMEOUT_SECONDS = _resolve_network_timeout_seconds()
-
-
-def _validate_https_url(url: str, *, source: str) -> None:
-    """Ensure URL uses https and includes a host."""
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    if scheme != "https" or not parsed.netloc:
-        raise RuntimeError(
-            f"Refusing {source} from unsupported URL {url!r}. "
-            "Only absolute https URLs are allowed."
-        )
-
-
-def get_transport() -> str:
-    """Return the package download transport mode."""
-    requested = os.environ.get("CODEX_SETUP_TRANSPORT", "direct").strip().lower()
-    if requested not in {"direct", "npm"}:
-        print(
-            f"WARNING: Unknown CODEX_SETUP_TRANSPORT={requested!r}; "
-            "falling back to 'direct'."
-        )
-        return "direct"
-    return requested
-
-
-def _registry_json(path: str) -> dict:
-    """Fetch and decode JSON from the npm registry."""
-    url = f"{NPM_REGISTRY_URL}/{path.lstrip('/')}"
-    _validate_https_url(url, source="registry metadata request")
-    request = Request(url, headers={"Accept": "application/json"})
-    try:
-        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError:
-        raise
-    except URLError as exc:
-        raise RuntimeError(f"Failed to fetch registry metadata from {url}") from exc
-
-
-def _download_file(url: str, destination: Path) -> None:
-    """Download a URL to a destination path."""
-    _validate_https_url(url, source="file download")
-    request = Request(url)
-    try:
-        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
-            with destination.open("wb") as handle:
-                shutil.copyfileobj(response, handle)
-    except URLError as exc:
-        raise RuntimeError(f"Failed to download file from {url}") from exc
-
-
-def _download_tarball_from_registry(
-    package_name: str, package_version: str, destination_dir: Path
-) -> Optional[Path]:
-    """
-    Download a package tarball from npm registry metadata.
-
-    Returns:
-        Path to the downloaded tarball, or None if that package version does not exist.
-    """
-    encoded_name = quote(package_name, safe="")
-    encoded_version = quote(package_version, safe="")
-    metadata_path = f"{encoded_name}/{encoded_version}"
-
-    try:
-        metadata = _registry_json(metadata_path)
-    except HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
-    except URLError as exc:
-        raise RuntimeError(
-            f"Failed to reach npm registry for {package_name}@{package_version}"
-        ) from exc
-
-    tarball_url = metadata.get("dist", {}).get("tarball")
-    if not tarball_url:
-        raise RuntimeError(
-            f"npm registry metadata missing dist.tarball for "
-            f"{package_name}@{package_version}"
-        )
-
-    file_name = tarball_url.rsplit("/", 1)[-1]
-    tarball_path = destination_dir / file_name
-    _download_file(tarball_url, tarball_path)
-    return tarball_path
 
 
 def run_command(cmd, cwd=None, check=True):
@@ -156,200 +34,244 @@ def run_command(cmd, cwd=None, check=True):
         raise
 
 
-def check_dependencies(transport: str) -> bool:
-    """Check runtime dependencies for the selected transport mode."""
-    print(f"Checking dependencies for transport='{transport}'...")
+def check_dependencies():
+    """Check if required dependencies are installed."""
+    print("Checking dependencies...")
 
-    if transport == "direct":
-        print("OK: direct transport selected (no npm dependency).")
-        return True
-
-    # npm mode
+    # Check if npm is available
     try:
         result = run_command(["npm", "--version"], check=False)
         if result.returncode != 0:
             print("ERROR: npm is not installed. Please install Node.js and npm first.")
-            print("   Or use CODEX_SETUP_TRANSPORT=direct")
+            print("   You can install it with: conda install nodejs")
             return False
         print(f"OK: npm version: {result.stdout.strip()}")
     except FileNotFoundError:
         print("ERROR: npm is not found. Please install Node.js and npm first.")
-        print("   Or use CODEX_SETUP_TRANSPORT=direct")
+        print("   You can install it with: conda install nodejs")
         return False
 
     return True
 
 
-def resolve_codex_version(transport: str) -> str:
-    """Resolve the Codex npm version to install."""
-    requested = os.environ.get("CODEX_NPM_VERSION", "").strip()
-    if requested:
-        print(f"Using requested CODEX_NPM_VERSION: {requested}")
-        return requested
+def download_codex_package():
+    """
+    Download and extract the codex-sdk npm package into a temporary directory.
 
-    print("Resolving latest @openai/codex version...")
-    if transport == "npm":
-        result = run_command(["npm", "view", "@openai/codex", "version"])
-        version = result.stdout.strip()
-        if not version:
-            raise RuntimeError("Could not resolve @openai/codex version from npm")
-        print(f"Resolved @openai/codex version: {version}")
-        return version
+    Uses the resolved npm package spec, runs `npm pack` to download a tarball, extracts it, and returns the path to the extracted package directory. On error, the temporary download directory is removed and the exception is re-raised.
 
-    latest = _registry_json(f"{quote('@openai/codex', safe='')}/latest")
-    version = latest.get("version", "").strip()
-    if not version:
-        raise RuntimeError(
-            "Could not resolve @openai/codex latest version from registry"
-        )
-    print(f"Resolved @openai/codex version: {version}")
-    return version
+    Returns:
+        package_dir (Path): Path to the extracted package directory named like "package".
 
+    Raises:
+        RuntimeError: If no tarball is found after `npm pack` or no package directory is found after extraction.
+        Exception: Propagates other exceptions encountered during download or extraction.
+    """
+    print("Downloading codex-sdk package...")
 
-def extract_tarball(tarball_path: Path, destination: Path) -> Path:
-    """Extract a tarball and return the extracted package directory."""
-    destination.mkdir(parents=True, exist_ok=True)
-    run_command(["tar", "-xzf", str(tarball_path), "-C", str(destination)])
-    package_dir = destination / "package"
-    if not package_dir.exists():
-        raise RuntimeError(f"No package directory found in {tarball_path.name}")
-    return package_dir
-
-
-def download_codex_packages(version: str, transport: str) -> Tuple[Path, List[Path]]:
-    """Download package(s) that contain vendor binaries for all target platforms."""
-    print(f"Downloading Codex packages (transport='{transport}')...")
-
+    # Create a temporary directory for the download
     temp_dir = Path(tempfile.mkdtemp(prefix="codex-setup-"))
     print(f"Using temporary directory: {temp_dir}")
 
-    package_dirs: List[Path] = []
+    try:
+        # Download the package
+        package_spec = resolve_codex_sdk_npm_spec()
+        print(f"Using npm package: {package_spec}")
+        run_command(["npm", "pack", package_spec], cwd=temp_dir)
 
-    # Older releases bundled all targets in @openai/codex-sdk. Keep this path for
-    # backwards compatibility.
-    legacy_package = "@openai/codex-sdk"
-    legacy_tarball: Optional[Path] = None
-    if transport == "npm":
-        sdk_spec = f"{legacy_package}@{version}"
-        sdk_pack = run_command(["npm", "pack", sdk_spec], cwd=temp_dir, check=False)
-        if sdk_pack.returncode == 0:
-            legacy_tarball = next(temp_dir.glob("openai-codex-sdk-*.tgz"), None)
-    else:
-        print(f"Trying legacy bundle {legacy_package}@{version} via registry API...")
-        legacy_tarball = _download_tarball_from_registry(
-            legacy_package, version, temp_dir
-        )
+        # Find the downloaded tarball
+        tarball_files = list(temp_dir.glob("*.tgz"))
+        if not tarball_files:
+            raise RuntimeError("No tarball found after npm pack")
 
-    if legacy_tarball is not None:
-        sdk_package_dir = extract_tarball(legacy_tarball, temp_dir / "codex-sdk")
-        if (sdk_package_dir / "vendor").exists():
-            print(f"Found vendored binaries in {legacy_package}@{version}")
-            package_dirs.append(sdk_package_dir)
+        tarball_path = tarball_files[0]
+        print(f"Downloaded: {tarball_path.name}")
 
-    if package_dirs:
-        return temp_dir, package_dirs
+        # Extract the tarball
+        print("Extracting package...")
+        _extract_tarball(tarball_path, temp_dir)
 
-    print(
-        "Falling back to platform-specific @openai/codex artifacts "
-        "(new packaging format)."
-    )
-    for target, suffix in TARGET_TO_SUFFIX.items():
-        package_name = "@openai/codex"
-        package_version = f"{version}-{suffix}"
-        print(f"Downloading {package_name}@{package_version} for {target}")
+        # Find the extracted package directory
+        package_dirs = [
+            d for d in temp_dir.iterdir() if d.is_dir() and d.name.startswith("package")
+        ]
+        if not package_dirs:
+            raise RuntimeError("No package directory found after extraction")
 
-        tarball: Optional[Path] = None
-        if transport == "npm":
-            spec = f"{package_name}@{package_version}"
-            packed = run_command(["npm", "pack", spec], cwd=temp_dir, check=False)
-            if packed.returncode != 0:
-                print(
-                    "WARNING: npm pack failed for "
-                    f"{target} ({suffix}); skipping this target."
-                )
-                if packed.stderr:
-                    print(packed.stderr.strip())
-                continue
-            tarball = temp_dir / f"openai-codex-{version}-{suffix}.tgz"
-            if not tarball.exists():
-                matches = list(temp_dir.glob(f"openai-codex-*{suffix}.tgz"))
-                if len(matches) != 1:
-                    print(
-                        "WARNING: Could not locate tarball for "
-                        f"{target} ({suffix}); skipping this target."
-                    )
-                    continue
-                tarball = matches[0]
-        else:
-            tarball = _download_tarball_from_registry(
-                package_name, package_version, temp_dir
-            )
-            if tarball is None:
-                print(
-                    "WARNING: No registry tarball found for "
-                    f"{package_name}@{package_version}; skipping this target."
-                )
-                continue
+        package_dir = package_dirs[0]
+        print(f"Extracted to: {package_dir}")
 
-        package_dir = extract_tarball(tarball, temp_dir / f"platform-{suffix}")
-        vendor_dir = package_dir / "vendor"
-        if not vendor_dir.exists():
-            print(
-                "WARNING: Vendor directory missing for "
-                f"{target} ({suffix}); skipping this target."
-            )
-            continue
-        package_dirs.append(package_dir)
+        return package_dir
 
-    if not package_dirs:
-        raise RuntimeError(
-            "Failed to download any platform-specific @openai/codex artifacts."
-        )
-
-    return temp_dir, package_dirs
+    except Exception as e:
+        print(f"ERROR: Error downloading package: {e}")
+        # Clean up on error
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
-def setup_vendor_directory(package_dirs: List[Path], sdk_dir: Path):
-    """Copy vendor directories from downloaded packages to the SDK."""
+def setup_vendor_directory(package_dir, sdk_dir):
+    """Copy the vendor directory from the package to the SDK."""
     print("Setting up vendor directory...")
+
+    vendor_src = package_dir / "vendor"
     vendor_dest = sdk_dir / "src" / "codex_sdk" / "vendor"
+    vendor_parent = vendor_dest.parent
+    vendor_parent.mkdir(parents=True, exist_ok=True)
+    staged_vendor_dest = Path(tempfile.mkdtemp(prefix="vendor-new-", dir=vendor_parent))
 
-    # Remove existing vendor directory if it exists
-    if vendor_dest.exists():
-        print("Removing existing vendor directory...")
-        shutil.rmtree(vendor_dest)
+    try:
+        if vendor_src.exists():
+            # Copy the vendor directory directly when present in the package.
+            print(
+                f"Copying vendor directory from {vendor_src} to staging area "
+                f"{staged_vendor_dest}"
+            )
+            shutil.copytree(vendor_src, staged_vendor_dest, dirs_exist_ok=True)
+        else:
+            print(
+                "Vendor directory not found in downloaded package; "
+                "assembling vendor binaries from @openai/codex platform packages..."
+            )
+            _assemble_vendor_from_platform_packages(package_dir, staged_vendor_dest)
 
-    vendor_dest.mkdir(parents=True, exist_ok=True)
+        # Verify the staged copy before replacing the current tree.
+        if not staged_vendor_dest.exists():
+            raise RuntimeError("Failed to stage vendor directory")
 
-    copied_targets = set()
-    for package_dir in package_dirs:
-        vendor_src = package_dir / "vendor"
-        if not vendor_src.exists():
-            raise RuntimeError(f"Vendor directory not found in {package_dir}")
-        for target_dir in sorted(p for p in vendor_src.iterdir() if p.is_dir()):
-            destination = vendor_dest / target_dir.name
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(target_dir, destination)
-            copied_targets.add(target_dir.name)
-
-    # Verify the copy
-    if not vendor_dest.exists():
-        raise RuntimeError("Failed to copy vendor directory")
-
-    missing_targets = sorted(set(TARGET_TO_SUFFIX.keys()) - copied_targets)
-    if missing_targets:
-        raise RuntimeError(
-            "Missing vendored targets after copy: " + ", ".join(missing_targets)
-        )
+        _replace_directory(staged_vendor_dest, vendor_dest)
+    except Exception:
+        shutil.rmtree(staged_vendor_dest, ignore_errors=True)
+        raise
 
     print("SUCCESS: Vendor directory set up successfully")
-
-    # Show what platforms are available
-    platforms = sorted(d.name for d in vendor_dest.iterdir() if d.is_dir())
+    platforms = [d.name for d in vendor_dest.iterdir() if d.is_dir()]
     print(f"Available platforms: {', '.join(platforms)}")
 
     return vendor_dest
+
+
+def _replace_directory(staged_dir: Path, dest_dir: Path) -> None:
+    """Replace dest_dir with a fully prepared staged_dir, restoring the old tree on failure."""
+    backup_dir = None
+
+    try:
+        if dest_dir.exists():
+            backup_dir = Path(
+                tempfile.mkdtemp(prefix=f"{dest_dir.name}-backup-", dir=dest_dir.parent)
+            )
+            backup_dir.rmdir()
+            dest_dir.rename(backup_dir)
+
+        staged_dir.rename(dest_dir)
+    except Exception:
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir, ignore_errors=True)
+        if backup_dir is not None and backup_dir.exists():
+            backup_dir.rename(dest_dir)
+        raise
+    finally:
+        if backup_dir is not None and backup_dir.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
+
+
+def _read_package_json(package_dir: Path) -> dict:
+    package_json_path = package_dir / "package.json"
+    if not package_json_path.exists():
+        raise RuntimeError(
+            f"package.json not found in downloaded package: {package_dir}"
+        )
+    return json.loads(package_json_path.read_text(encoding="utf-8"))
+
+
+def _resolve_codex_cli_version(package_dir: Path) -> str:
+    package_json = _read_package_json(package_dir)
+    dependencies = package_json.get("dependencies", {})
+    dep_version = dependencies.get("@openai/codex")
+    if isinstance(dep_version, str) and dep_version.strip():
+        return dep_version.strip().lstrip("^~")
+
+    # Fallback if the downloaded package itself is @openai/codex.
+    package_name = package_json.get("name")
+    package_version = package_json.get("version")
+    if package_name == "@openai/codex" and isinstance(package_version, str):
+        return package_version.split("-", 1)[0]
+
+    raise RuntimeError(
+        "Could not determine @openai/codex version from downloaded package metadata"
+    )
+
+
+def _assemble_vendor_from_platform_packages(
+    package_dir: Path, vendor_dest: Path
+) -> None:
+    codex_version = _resolve_codex_cli_version(package_dir)
+    print(f"Resolved @openai/codex version: {codex_version}")
+
+    # Map codex npm package suffixes to vendor target triples expected by the SDK.
+    platform_matrix = {
+        "linux-x64": "x86_64-unknown-linux-musl",
+        "linux-arm64": "aarch64-unknown-linux-musl",
+        "darwin-x64": "x86_64-apple-darwin",
+        "darwin-arm64": "aarch64-apple-darwin",
+        "win32-x64": "x86_64-pc-windows-msvc",
+        "win32-arm64": "aarch64-pc-windows-msvc",
+    }
+
+    vendor_dest.mkdir(parents=True, exist_ok=True)
+    assembly_dir = package_dir.parent / "platform-vendor-assembly"
+    assembly_dir.mkdir(parents=True, exist_ok=True)
+
+    for platform_suffix, target_triple in platform_matrix.items():
+        package_spec = f"@openai/codex@{codex_version}-{platform_suffix}"
+        print(
+            f"Downloading platform package {package_spec} "
+            f"for target {target_triple}..."
+        )
+        before = {p.name for p in assembly_dir.glob("*.tgz")}
+        run_command(["npm", "pack", package_spec], cwd=assembly_dir)
+        after = list(assembly_dir.glob("*.tgz"))
+        new_tarballs = [p for p in after if p.name not in before]
+        if not new_tarballs:
+            raise RuntimeError(
+                f"Failed to locate tarball after npm pack: {package_spec}"
+            )
+        tarball_path = max(new_tarballs, key=lambda p: p.stat().st_mtime)
+
+        extract_dir = assembly_dir / f"extract-{platform_suffix}"
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        _extract_tarball(tarball_path, extract_dir)
+
+        platform_vendor_src = extract_dir / "package" / "vendor" / target_triple
+        if not platform_vendor_src.exists():
+            raise RuntimeError(
+                f"Vendor path missing in platform package {package_spec}: {platform_vendor_src}"
+            )
+
+        platform_vendor_dest = vendor_dest / target_triple
+        if platform_vendor_dest.exists():
+            shutil.rmtree(platform_vendor_dest)
+        shutil.copytree(platform_vendor_src, platform_vendor_dest)
+
+        tarball_path.unlink(missing_ok=True)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def _extract_tarball(tarball_path: Path, dest_dir: Path) -> None:
+    """Extract a gzip-compressed tarball with basic path traversal protection."""
+    with tarfile.open(tarball_path, "r:gz") as archive:
+        dest_root = dest_dir.resolve()
+        for member in archive.getmembers():
+            member_path = (dest_dir / member.name).resolve()
+            try:
+                member_path.relative_to(dest_root)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Tarball contains path outside extraction dir: {member.name}"
+                ) from exc
+        archive.extractall(dest_dir)
 
 
 def verify_binary_for_current_platform(vendor_dir):
@@ -451,35 +373,43 @@ def print_next_steps():
 
 
 def main():
-    """Main setup function."""
+    """
+    Orchestrates the SDK binary setup workflow, performs installation steps, and reports success or failure.
+
+    Performs dependency verification, downloads the codex-sdk npm package, installs the package's vendor files into the SDK tree, verifies and tests the platform-specific codex binary, cleans up temporary files, and prints post-setup instructions and progress/error messages to stdout.
+
+    Returns:
+        int: `0` on success, `1` on failure.
+    """
     print("Codex Python SDK Setup")
     print("=" * 40)
     print()
-    transport = get_transport()
-    print(f"Transport mode: {transport}")
 
     # Get the SDK directory (where this script is located)
     sdk_dir = Path(__file__).resolve().parent.parent
     print(f"SDK directory: {sdk_dir}")
 
-    temp_dir = None
     try:
         # Check dependencies
-        if not check_dependencies(transport):
+        if not check_dependencies():
             return 1
 
-        # Resolve target version and download vendor packages
-        version = resolve_codex_version(transport)
-        temp_dir, package_dirs = download_codex_packages(version, transport)
+        # Download the package
+        package_dir = download_codex_package()
 
         # Setup vendor directory
-        vendor_dir = setup_vendor_directory(package_dirs, sdk_dir)
+        vendor_dir = setup_vendor_directory(package_dir, sdk_dir)
 
         # Verify binary for current platform
         binary_path = verify_binary_for_current_platform(vendor_dir)
 
         # Test the binary
         test_binary(binary_path)
+
+        # Clean up temporary directory
+        temp_dir = package_dir.parent
+        print(f"Cleaning up temporary directory: {temp_dir}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Print next steps
         print_next_steps()
@@ -489,14 +419,57 @@ def main():
     except Exception as e:
         print(f"\nERROR: Setup failed: {e}")
         print("\nTroubleshooting:")
-        print("1. Verify network connectivity to registry.npmjs.org")
+        print("1. Make sure you have Node.js and npm installed")
         print("2. Check your internet connection")
-        print("3. For npm-based download mode, set CODEX_SETUP_TRANSPORT=npm")
+        print("3. Try running: conda install nodejs")
         return 1
-    finally:
-        if temp_dir is not None:
-            print(f"Cleaning up temporary directory: {temp_dir}")
-            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def resolve_codex_sdk_npm_spec() -> str:
+    """
+    Build the npm package spec for @openai/codex-sdk, using the repository pyproject version when available.
+
+    Reads the repository pyproject.toml to find the [project].version; if a version is found returns "@openai/codex-sdk@<version>", otherwise returns "@openai/codex-sdk".
+
+    Returns:
+        str: The npm package spec to pass to npm (e.g. "@openai/codex-sdk@1.2.3" or "@openai/codex-sdk").
+    """
+    sdk_dir = Path(__file__).resolve().parent.parent
+    pyproject_path = sdk_dir / "pyproject.toml"
+    version = read_pyproject_version(pyproject_path)
+    if version:
+        return f"@openai/codex-sdk@{version}"
+    return "@openai/codex-sdk"
+
+
+def read_pyproject_version(pyproject_path: Path) -> str:
+    """
+    Extract the value of [project].version from a pyproject.toml file in a best-effort manner.
+
+    Searches the file for a top-level [project] section and returns the value from a `version = "..."` or `version = '...'` line within that section. This is a simple text-based extraction (no TOML parser) and may not handle complex or nonstandard TOML constructs.
+
+    Parameters:
+        pyproject_path (Path): Path to the pyproject.toml file to read.
+
+    Returns:
+        str: The version string if found, otherwise an empty string.
+    """
+    if not pyproject_path.exists():
+        return ""
+
+    in_project = False
+    version_re = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']\s*$')
+    for line in pyproject_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project:
+            match = version_re.match(stripped)
+            if match:
+                return match.group(1)
+
+    return ""
 
 
 if __name__ == "__main__":

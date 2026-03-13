@@ -31,6 +31,7 @@ from codex_sdk.integrations.pydantic_ai_model import (
     _render_tool_definitions,
     _to_int,
     _tool_calls_from_envelope,
+    _TurnAccumulationState,
     _usage_from_mapping,
 )
 from codex_sdk.options import CodexOptions, ThreadOptions
@@ -41,6 +42,7 @@ pydantic_ai = importlib.import_module("pydantic_ai")
 tools = importlib.import_module("pydantic_ai.tools")
 
 Agent = pydantic_ai.Agent
+AgentRunResultEvent = pydantic_ai.AgentRunResultEvent
 BuiltinToolCallPart = messages.BuiltinToolCallPart
 ModelRequest = messages.ModelRequest
 ModelResponse = messages.ModelResponse
@@ -55,6 +57,18 @@ UserPromptPart = messages.UserPromptPart
 ModelRequestParameters = models.ModelRequestParameters
 ToolDefinition = tools.ToolDefinition
 RequestUsage = importlib.import_module("pydantic_ai.usage").RequestUsage
+
+
+def _usage_input_tokens(usage):
+    return usage.input_tokens
+
+
+def _usage_cached_input_tokens(usage):
+    return usage.cache_read_tokens
+
+
+def _usage_output_tokens(usage):
+    return usage.output_tokens
 
 
 def _envelope_json(output):
@@ -102,9 +116,9 @@ async def test_codex_model_returns_tool_calls():
     assert response.parts[0].tool_name == "add"
     assert response.parts[0].tool_call_id == "call_1"
     assert response.parts[0].args == '{"a":1,"b":2}'
-    assert response.usage.input_tokens == 1
-    assert response.usage.cache_read_tokens == 2
-    assert response.usage.output_tokens == 3
+    assert _usage_input_tokens(response.usage) == 1
+    assert _usage_cached_input_tokens(response.usage) == 2
+    assert _usage_output_tokens(response.usage) == 3
     assert response.usage.details == {"cached_input_tokens": 2}
 
     prompt = app.turn_session_calls[0]["input"]
@@ -621,6 +635,37 @@ async def test_agent_run_stream_passes_run_context_to_codex_model():
     assert model.last_run_context is not None
 
 
+@pytest.mark.asyncio
+async def test_agent_run_stream_events_works_with_codex_model():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hel"}},
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={"item": {"id": "m1", "type": "agent_message", "text": "hello"}},
+            ),
+        ],
+        final_turn={
+            "id": "turn-stream-events",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "hello",
+        },
+    )
+    agent = Agent(model=CodexModel(app_server=app), output_type=str)
+
+    events = [event async for event in agent.run_stream_events("hi")]
+
+    assert any(isinstance(event, PartStartEvent) for event in events)
+    assert any(isinstance(event, AgentRunResultEvent) for event in events)
+    result_event = next(
+        event for event in events if isinstance(event, AgentRunResultEvent)
+    )
+    assert result_event.result.output == "hello"
+
+
 def test_codex_model_can_construct_codex_from_options():
     CodexModel(codex_options=CodexOptions(codex_path_override="codex-binary"))
 
@@ -777,9 +822,9 @@ async def test_codex_model_default_path_uses_app_server_and_returns_tool_calls()
     assert len(app.thread_start_calls) == 1
     assert len(app.turn_session_calls) == 1
     assert response.provider_details == {"thread_id": "thread-app"}
-    assert response.usage.input_tokens == 4
-    assert response.usage.cache_read_tokens == 1
-    assert response.usage.output_tokens == 2
+    assert _usage_input_tokens(response.usage) == 4
+    assert _usage_cached_input_tokens(response.usage) == 1
+    assert _usage_output_tokens(response.usage) == 2
     assert len(response.parts) == 1
     assert isinstance(response.parts[0], ToolCallPart)
     assert response.parts[0].tool_name == "add"
@@ -825,6 +870,116 @@ async def test_codex_model_default_stream_emits_incremental_text_deltas():
 
 
 @pytest.mark.asyncio
+async def test_codex_model_default_stream_extracts_text_from_envelope_updates():
+    app = FakeAppServerClient(
+        notifications=[
+            AppServerNotification(
+                method="item/updated",
+                params={
+                    "item": {
+                        "id": "m1",
+                        "type": "agent_message",
+                        "text": _envelope_json({"tool_calls": [], "final": "hel"}),
+                    }
+                },
+            ),
+            AppServerNotification(
+                method="item/updated",
+                params={
+                    "item": {
+                        "id": "m1",
+                        "type": "agent_message",
+                        "text": _envelope_json({"tool_calls": [], "final": "hello"}),
+                    }
+                },
+            ),
+        ],
+        final_turn={
+            "id": "turn-envelope-stream",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+            "finalResponse": _envelope_json({"tool_calls": [], "final": "hello"}),
+        },
+    )
+    model = CodexModel(app_server=app)
+
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    async with model.request_stream(
+        [ModelRequest(parts=[UserPromptPart("say hello")])], None, params
+    ) as streamed:
+        _ = [event async for event in streamed]
+        response = streamed.get()
+
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "hello"
+
+
+def test_handle_notification_streams_tool_calls_from_envelope_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-tool-update",
+            "usage": {"inputTokens": 0, "outputTokens": 0},
+            "finalResponse": "",
+        },
+    )
+    model = CodexModel(app_server=app)
+    streamed = CodexStreamedResponse(
+        model_request_parameters=ModelRequestParameters(
+            output_mode="tool", allow_text_output=False
+        ),
+        model_name="codex",
+        provider_name="openai",
+    )
+    state = _TurnAccumulationState()
+    tool_calls = []
+
+    def capture_tool_call(**kwargs):
+        tool_calls.append(kwargs)
+
+    monkeypatch.setattr(streamed, "push_tool_call", capture_tool_call)
+
+    model._handle_notification(
+        notification=AppServerNotification(
+            method="item/updated",
+            params={
+                "item": {
+                    "id": "m1",
+                    "type": "agent_message",
+                    "text": _envelope_json(
+                        {
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "name": "add",
+                                    "arguments": '{"a":1,"b":2}',
+                                }
+                            ],
+                            "final": "",
+                        }
+                    ),
+                }
+            },
+        ),
+        state=state,
+        streamed=streamed,
+        allow_stream_text=False,
+        stream_raw_text=False,
+    )
+
+    assert tool_calls == [
+        {
+            "vendor_part_id": 0,
+            "tool_name": "add",
+            "args": '{"a":1,"b":2}',
+            "tool_call_id": "call_1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_codex_model_stream_reconciles_with_most_recent_item_update():
     app = FakeAppServerClient(
         notifications=[
@@ -857,8 +1012,7 @@ async def test_codex_model_stream_reconciles_with_most_recent_item_update():
         response = streamed.get()
 
     assert [part.content for part in response.parts if isinstance(part, TextPart)] == [
-        "abcd",
-        "b",
+        "abcd"
     ]
 
 
@@ -923,13 +1077,13 @@ def test_app_server_helpers_handle_edge_cases():
 
     usage = _usage_from_mapping({"input_tokens": "2", "outputTokens": 4})
     assert usage is not None
-    assert usage.input_tokens == 2
-    assert usage.output_tokens == 4
-    assert usage.cache_read_tokens == 0
+    assert _usage_input_tokens(usage) == 2
+    assert _usage_output_tokens(usage) == 4
+    assert _usage_cached_input_tokens(usage) == 0
 
     usage_from_turn = _extract_usage_from_turn({"tokenUsage": {"inputTokens": 1}})
     assert usage_from_turn is not None
-    assert usage_from_turn.input_tokens == 1
+    assert _usage_input_tokens(usage_from_turn) == 1
 
     assert _extract_turn_text({"output": {"final": "done"}}) == "done"
     assert (
