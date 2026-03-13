@@ -8,6 +8,9 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
 - App-server helpers for newly exposed protocol methods:
   `thread_metadata_update`, `plugin_list`, `plugin_install`, `plugin_uninstall`,
   `command_exec_write`, `command_exec_resize`, and `command_exec_terminate`.
+- Root-level collaboration exports for the `collab_tool_call` item family:
+  `CollabToolCallItem`, `CollabToolCallStatus`, `CollabTool`, `CollabAgentStatus`,
+  and `CollabAgentState`.
 
 ### Updated
 - `command_exec` now accepts the current 0.114.0 app-server parameters for interactive
@@ -21,7 +24,7 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
   canonical final turn response.
 - The PydanticAI integration now targets the current release line only
   (`pydantic-ai>=1.68.0,<2`) and uses the modern streaming API surface directly.
-- README app-server method coverage updated and SDK version set to 0.114.0.
+- README app-server method coverage, collaboration export docs, and SDK version updated to 0.114.0.
 
 ### Notes
 - Codex 0.114.0 adds plugin marketplace endpoints, thread metadata updates,

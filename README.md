@@ -476,6 +476,7 @@ print(turn.final_response)
 - `command_execution`
 - `file_change`
 - `mcp_tool_call`
+- `collab_tool_call`
 - `web_search`
 - `todo_list`
 - `error`
@@ -552,7 +553,8 @@ last_thread = codex.resume_last_thread()
 ### Turn helpers
 
 Each `Turn` provides convenience filters: `agent_messages()`, `reasoning()`, `commands()`,
-`file_changes()`, `mcp_tool_calls()`, `web_searches()`, `todo_lists()`, and `errors()`.
+`file_changes()`, `mcp_tool_calls()`, `collab_tool_calls()`, `web_searches()`,
+`todo_lists()`, and `errors()`.
 
 <a id="api"></a>
 ## ![API Reference](https://img.shields.io/badge/API-Reference-6366f1?style=for-the-badge&logo=python&logoColor=white)
@@ -573,7 +575,12 @@ Exceptions:
 Typed events and items:
 - `ThreadEvent` union of `thread.*`, `turn.*`, `item.*`, and `error` events.
 - `ThreadItem` union of `agent_message`, `reasoning`, `command_execution`, `file_change`,
-  `mcp_tool_call`, `web_search`, `todo_list`, `error`.
+  `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, `error`.
+- `CollabToolCallItem`: typed item for `collab_tool_call` thread history entries.
+- `CollabToolCallStatus`: typed status values for collaboration tool calls.
+- `CollabTool`: collaboration tool metadata attached to `CollabToolCallItem`.
+- `CollabAgentStatus`: agent lifecycle status attached to collaboration state updates.
+- `CollabAgentState`: agent metadata/state payload emitted for collaboration items.
 
 <a id="examples"></a>
 ## ![Examples](https://img.shields.io/badge/Examples-Reference%20Scripts-6366f1?style=for-the-badge&logo=python&logoColor=white)

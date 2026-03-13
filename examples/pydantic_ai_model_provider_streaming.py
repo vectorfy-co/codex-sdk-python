@@ -7,6 +7,7 @@ useful for terminal UIs and web UIs where you want to render the model output
 incrementally as Codex emits agent-message updates.
 
 Requires:
+  Python 3.10+   (the `pydantic-ai` extra is only installed on Python 3.10+)
   uv add "codex-sdk-python[pydantic-ai]"
   codex login   (or set CODEX_API_KEY)
 """

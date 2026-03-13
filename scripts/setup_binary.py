@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -88,7 +89,7 @@ def download_codex_package():
 
         # Extract the tarball
         print("Extracting package...")
-        run_command(["tar", "-xzf", str(tarball_path)], cwd=temp_dir)
+        _extract_tarball(tarball_path, temp_dir)
 
         # Find the extracted package directory
         package_dirs = [
@@ -115,34 +116,63 @@ def setup_vendor_directory(package_dir, sdk_dir):
 
     vendor_src = package_dir / "vendor"
     vendor_dest = sdk_dir / "src" / "codex_sdk" / "vendor"
+    vendor_parent = vendor_dest.parent
+    vendor_parent.mkdir(parents=True, exist_ok=True)
+    staged_vendor_dest = Path(tempfile.mkdtemp(prefix="vendor-new-", dir=vendor_parent))
 
-    # Remove existing vendor directory if it exists
-    if vendor_dest.exists():
-        print("Removing existing vendor directory...")
-        shutil.rmtree(vendor_dest)
+    try:
+        if vendor_src.exists():
+            # Copy the vendor directory directly when present in the package.
+            print(
+                f"Copying vendor directory from {vendor_src} to staging area "
+                f"{staged_vendor_dest}"
+            )
+            shutil.copytree(vendor_src, staged_vendor_dest, dirs_exist_ok=True)
+        else:
+            print(
+                "Vendor directory not found in downloaded package; "
+                "assembling vendor binaries from @openai/codex platform packages..."
+            )
+            _assemble_vendor_from_platform_packages(package_dir, staged_vendor_dest)
 
-    if vendor_src.exists():
-        # Copy the vendor directory directly when present in the package.
-        print(f"Copying vendor directory from {vendor_src} to {vendor_dest}")
-        shutil.copytree(vendor_src, vendor_dest)
-    else:
-        print(
-            "Vendor directory not found in downloaded package; "
-            "assembling vendor binaries from @openai/codex platform packages..."
-        )
-        _assemble_vendor_from_platform_packages(package_dir, vendor_dest)
+        # Verify the staged copy before replacing the current tree.
+        if not staged_vendor_dest.exists():
+            raise RuntimeError("Failed to stage vendor directory")
 
-    # Verify the copy
-    if not vendor_dest.exists():
-        raise RuntimeError("Failed to copy vendor directory")
+        _replace_directory(staged_vendor_dest, vendor_dest)
+    except Exception:
+        shutil.rmtree(staged_vendor_dest, ignore_errors=True)
+        raise
 
     print("SUCCESS: Vendor directory set up successfully")
-
-    # Show what platforms are available
     platforms = [d.name for d in vendor_dest.iterdir() if d.is_dir()]
     print(f"Available platforms: {', '.join(platforms)}")
 
     return vendor_dest
+
+
+def _replace_directory(staged_dir: Path, dest_dir: Path) -> None:
+    """Replace dest_dir with a fully prepared staged_dir, restoring the old tree on failure."""
+    backup_dir = None
+
+    try:
+        if dest_dir.exists():
+            backup_dir = Path(
+                tempfile.mkdtemp(prefix=f"{dest_dir.name}-backup-", dir=dest_dir.parent)
+            )
+            backup_dir.rmdir()
+            dest_dir.rename(backup_dir)
+
+        staged_dir.rename(dest_dir)
+    except Exception:
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir, ignore_errors=True)
+        if backup_dir is not None and backup_dir.exists():
+            backup_dir.rename(dest_dir)
+        raise
+    finally:
+        if backup_dir is not None and backup_dir.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def _read_package_json(package_dir: Path) -> dict:
@@ -212,7 +242,7 @@ def _assemble_vendor_from_platform_packages(
         if extract_dir.exists():
             shutil.rmtree(extract_dir)
         extract_dir.mkdir(parents=True, exist_ok=True)
-        run_command(["tar", "-xzf", str(tarball_path), "-C", str(extract_dir)])
+        _extract_tarball(tarball_path, extract_dir)
 
         platform_vendor_src = extract_dir / "package" / "vendor" / target_triple
         if not platform_vendor_src.exists():
@@ -227,6 +257,21 @@ def _assemble_vendor_from_platform_packages(
 
         tarball_path.unlink(missing_ok=True)
         shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def _extract_tarball(tarball_path: Path, dest_dir: Path) -> None:
+    """Extract a gzip-compressed tarball with basic path traversal protection."""
+    with tarfile.open(tarball_path, "r:gz") as archive:
+        dest_root = dest_dir.resolve()
+        for member in archive.getmembers():
+            member_path = (dest_dir / member.name).resolve()
+            try:
+                member_path.relative_to(dest_root)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Tarball contains path outside extraction dir: {member.name}"
+                ) from exc
+        archive.extractall(dest_dir)
 
 
 def verify_binary_for_current_platform(vendor_dir):
