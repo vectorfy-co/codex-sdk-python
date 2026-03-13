@@ -9,10 +9,13 @@ This file tracks SDK-level changes. Keep the newest changes at the top.
   general OpenAI model examples, matching the current official model guidance.
 - Added a matching regression assertion in the PydanticAI provider test coverage.
 - `scripts/setup_binary.py` now falls back to the latest published
-  `@openai/codex-sdk` package when a Python-only patch release version has not
-  been published to npm yet, which fixes CI for SDK-only patch releases.
+  compatible `@openai/codex-sdk` package from the same major/minor release line
+  when a Python-only patch release version has not been published to npm yet,
+  which fixes CI for SDK-only patch releases without silently jumping to a newer
+  release line.
 - Added a repo-managed pre-push hook installer and CI-check runner so local
-  pushes can execute the same validation flow as GitHub Actions.
+  pushes can execute the same validation flow as GitHub Actions, using a
+  non-mutating vendor verification step instead of rewriting checked-in binaries.
 
 ## [0.114.0] - 2026-03-13
 

@@ -865,8 +865,8 @@ Install the repo-managed pre-push hook in your local clone:
 python scripts/install_git_hooks.py
 ```
 
-That hook runs the same local validation stack used by CI before allowing a
-push:
+That hook runs the same local lint, type, vendor verification, and test stack
+before allowing a push:
 
 ```bash
 python scripts/run_ci_checks.py
@@ -892,9 +892,10 @@ uv run mypy src
 ## ![CI/CD](https://img.shields.io/badge/CI%2FCD-Overview-1F4B99?style=for-the-badge&logo=gnubash&logoColor=white)
 
 This repository includes GitHub Actions workflows under `.github/workflows/`.
-The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
-For local parity, the checked-in pre-push hook runs the same validation flow
-after you install it with `python scripts/install_git_hooks.py`.
+The CI pipeline runs linting, type checks, binary setup, and
+`pytest --cov=codex_sdk`. For local parity, the checked-in pre-push hook runs
+the same lint/type/test gates plus a non-mutating vendor verification step after
+you install it with `python scripts/install_git_hooks.py`.
 Release automation creates GitHub releases from `CHANGELOG_SDK.md` when you push a
 `vX.Y.Z` tag or manually dispatch the workflow, then the publish workflow uploads
 the package to PyPI on release publish.

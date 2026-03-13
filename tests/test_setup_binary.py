@@ -48,7 +48,7 @@ def test_resolve_codex_sdk_npm_specs_prefers_exact_version(
 
     assert setup_binary_module.resolve_codex_sdk_npm_specs() == [
         "@openai/codex-sdk@0.114.1",
-        "@openai/codex-sdk",
+        "@openai/codex-sdk@0.114.x",
     ]
 
 
@@ -68,11 +68,11 @@ def test_npm_pack_codex_sdk_package_falls_back_when_exact_version_is_missing(
 
     used_spec = setup_binary_module.npm_pack_codex_sdk_package(
         tmp_path,
-        ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk"],
+        ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk@0.114.x"],
     )
 
-    assert used_spec == "@openai/codex-sdk"
-    assert calls == ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk"]
+    assert used_spec == "@openai/codex-sdk@0.114.x"
+    assert calls == ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk@0.114.x"]
 
 
 def test_npm_pack_codex_sdk_package_does_not_hide_other_npm_errors(
@@ -86,5 +86,23 @@ def test_npm_pack_codex_sdk_package_does_not_hide_other_npm_errors(
     with pytest.raises(subprocess.CalledProcessError):
         setup_binary_module.npm_pack_codex_sdk_package(
             tmp_path,
-            ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk"],
+            ["@openai/codex-sdk@0.114.1", "@openai/codex-sdk@0.114.x"],
         )
+
+
+def test_build_minor_compatible_npm_spec(
+    setup_binary_module: ModuleType,
+) -> None:
+    assert (
+        setup_binary_module.build_minor_compatible_npm_spec("0.114.1")
+        == "@openai/codex-sdk@0.114.x"
+    )
+
+
+def test_build_minor_compatible_npm_spec_falls_back_for_unparseable_version(
+    setup_binary_module: ModuleType,
+) -> None:
+    assert (
+        setup_binary_module.build_minor_compatible_npm_spec("main")
+        == "@openai/codex-sdk"
+    )
