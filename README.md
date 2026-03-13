@@ -857,6 +857,23 @@ Coverage is configured in `pyproject.toml` with `fail_under = 95`.
 
 For SDK release updates, follow `UPGRADE_CHECKLIST.md`.
 
+### Run CI checks before push
+
+Install the repo-managed pre-push hook in your local clone:
+
+```bash
+python scripts/install_git_hooks.py
+```
+
+That hook runs the same local validation stack used by CI before allowing a
+push:
+
+```bash
+python scripts/run_ci_checks.py
+```
+
+If you need to bypass it for a single push, set `SKIP_PRE_PUSH_CI=1`.
+
 ### Format and lint
 
 ```bash
@@ -876,6 +893,8 @@ uv run mypy src
 
 This repository includes GitHub Actions workflows under `.github/workflows/`.
 The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
+For local parity, the checked-in pre-push hook runs the same validation flow
+after you install it with `python scripts/install_git_hooks.py`.
 Release automation creates GitHub releases from `CHANGELOG_SDK.md` when you push a
 `vX.Y.Z` tag or manually dispatch the workflow, then the publish workflow uploads
 the package to PyPI on release publish.
