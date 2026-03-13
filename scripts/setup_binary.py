@@ -6,6 +6,9 @@ This script downloads the real codex binary from the npm package and sets it up
 for use with the Python SDK.
 """
 
+from __future__ import annotations
+
+import argparse
 import json
 import platform
 import re
@@ -15,6 +18,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import Sequence
 
 
 def run_command(cmd, cwd=None, check=True):
@@ -75,9 +79,10 @@ def download_codex_package():
 
     try:
         # Download the package
-        package_spec = resolve_codex_sdk_npm_spec()
-        print(f"Using npm package: {package_spec}")
-        run_command(["npm", "pack", package_spec], cwd=temp_dir)
+        package_spec = npm_pack_codex_sdk_package(
+            temp_dir, resolve_codex_sdk_npm_specs()
+        )
+        print(f"Downloaded npm package: {package_spec}")
 
         # Find the downloaded tarball
         tarball_files = list(temp_dir.glob("*.tgz"))
@@ -319,6 +324,18 @@ def verify_binary_for_current_platform(vendor_dir):
     return binary_path
 
 
+def verify_vendor_directory(sdk_dir: Path) -> Path:
+    """Verify that the checked-in vendor tree contains the current platform binary."""
+    vendor_dir = sdk_dir / "src" / "codex_sdk" / "vendor"
+    if not vendor_dir.exists():
+        raise RuntimeError(
+            "Vendor directory is missing. Run `python scripts/setup_binary.py` first."
+        )
+
+    verify_binary_for_current_platform(vendor_dir)
+    return vendor_dir
+
+
 def test_binary(binary_path):
     """Test that the binary works."""
     print("Testing binary...")
@@ -372,6 +389,17 @@ def print_next_steps():
     print("=" * 60)
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse setup script command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Verify the existing vendor binaries without downloading or replacing them.",
+    )
+    return parser.parse_args()
+
+
 def main():
     """
     Orchestrates the SDK binary setup workflow, performs installation steps, and reports success or failure.
@@ -385,6 +413,8 @@ def main():
     print("=" * 40)
     print()
 
+    args = parse_args()
+
     # Get the SDK directory (where this script is located)
     sdk_dir = Path(__file__).resolve().parent.parent
     print(f"SDK directory: {sdk_dir}")
@@ -393,6 +423,11 @@ def main():
         # Check dependencies
         if not check_dependencies():
             return 1
+
+        if args.verify_only:
+            verify_vendor_directory(sdk_dir)
+            print("\nVendor verification complete.")
+            return 0
 
         # Download the package
         package_dir = download_codex_package()
@@ -425,21 +460,84 @@ def main():
         return 1
 
 
-def resolve_codex_sdk_npm_spec() -> str:
-    """
-    Build the npm package spec for @openai/codex-sdk, using the repository pyproject version when available.
+def npm_pack_codex_sdk_package(temp_dir: Path, package_specs: Sequence[str]) -> str:
+    """Run `npm pack` for the first available package spec, falling back from missing exact versions."""
+    if not package_specs:
+        raise RuntimeError("No npm package specs provided")
 
-    Reads the repository pyproject.toml to find the [project].version; if a version is found returns "@openai/codex-sdk@<version>", otherwise returns "@openai/codex-sdk".
+    last_error = None
+    for index, package_spec in enumerate(package_specs):
+        print(f"Using npm package: {package_spec}")
+        try:
+            run_command(["npm", "pack", package_spec], cwd=temp_dir)
+            return package_spec
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            is_missing_exact_version = index < len(
+                package_specs
+            ) - 1 and is_missing_npm_version_error(exc)
+            if not is_missing_exact_version:
+                raise
+
+            fallback_spec = package_specs[index + 1]
+            print(
+                "WARNING: "
+                f"{package_spec} is not published on npm yet; falling back to "
+                f"{fallback_spec}."
+            )
+
+    assert last_error is not None
+    raise last_error
+
+
+def is_missing_npm_version_error(error: subprocess.CalledProcessError) -> bool:
+    """Return True when npm failed because the requested package version does not exist."""
+    combined_output = "\n".join(
+        part.strip() for part in (error.stdout or "", error.stderr or "") if part
+    )
+    return (
+        "ETARGET" in combined_output or "No matching version found" in combined_output
+    )
+
+
+def resolve_codex_sdk_npm_specs() -> Sequence[str]:
+    """
+    Build the npm package specs for @openai/codex-sdk.
+
+    Reads the repository pyproject.toml to find the [project].version. When a
+    version is present, the exact npm version is tried first and the unpinned
+    package name is kept as a fallback for Python-only patch releases that do
+    not have a matching npm publish. If no version is found, only the unpinned
+    package name is returned.
 
     Returns:
-        str: The npm package spec to pass to npm (e.g. "@openai/codex-sdk@1.2.3" or "@openai/codex-sdk").
+        list[str]: Ordered npm package specs to try.
     """
     sdk_dir = Path(__file__).resolve().parent.parent
     pyproject_path = sdk_dir / "pyproject.toml"
     version = read_pyproject_version(pyproject_path)
     if version:
-        return f"@openai/codex-sdk@{version}"
-    return "@openai/codex-sdk"
+        return [
+            f"@openai/codex-sdk@{version}",
+            build_minor_compatible_npm_spec(version),
+        ]
+    return ["@openai/codex-sdk"]
+
+
+def build_minor_compatible_npm_spec(version: str) -> str:
+    """
+    Build an npm spec constrained to the same major/minor release line.
+
+    For Python-only patch releases such as 0.114.1, this falls back to the
+    latest published 0.114.x npm package instead of pulling an unrelated newer
+    minor release.
+    """
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
+    if not match:
+        return "@openai/codex-sdk"
+
+    major, minor, _patch = match.groups()
+    return f"@openai/codex-sdk@{major}.{minor}.x"
 
 
 def read_pyproject_version(pyproject_path: Path) -> str:

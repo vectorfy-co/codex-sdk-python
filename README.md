@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.114.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.114.1-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -857,6 +857,23 @@ Coverage is configured in `pyproject.toml` with `fail_under = 95`.
 
 For SDK release updates, follow `UPGRADE_CHECKLIST.md`.
 
+### Run CI checks before push
+
+Install the repo-managed pre-push hook in your local clone:
+
+```bash
+python scripts/install_git_hooks.py
+```
+
+That hook runs the same local lint, type, vendor verification, and test stack
+before allowing a push:
+
+```bash
+python scripts/run_ci_checks.py
+```
+
+If you need to bypass it for a single push, set `SKIP_PRE_PUSH_CI=1`.
+
 ### Format and lint
 
 ```bash
@@ -875,7 +892,10 @@ uv run mypy src
 ## ![CI/CD](https://img.shields.io/badge/CI%2FCD-Overview-1F4B99?style=for-the-badge&logo=gnubash&logoColor=white)
 
 This repository includes GitHub Actions workflows under `.github/workflows/`.
-The CI pipeline runs linting, type checks, and `pytest --cov=codex_sdk`.
+The CI pipeline runs linting, type checks, binary setup, and
+`pytest --cov=codex_sdk`. For local parity, the checked-in pre-push hook runs
+the same lint/type/test gates plus a non-mutating vendor verification step after
+you install it with `python scripts/install_git_hooks.py`.
 Release automation creates GitHub releases from `CHANGELOG_SDK.md` when you push a
 `vX.Y.Z` tag or manually dispatch the workflow, then the publish workflow uploads
 the package to PyPI on release publish.
