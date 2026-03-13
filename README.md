@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.107.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.114.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -312,14 +312,16 @@ The SDK also exposes helpers for most app-server endpoints:
 
 - Threads: `thread_start`, `thread_resume`, `thread_fork`, `thread_list`, `thread_loaded_list`,
   `thread_read`, `thread_archive`, `thread_unsubscribe`, `thread_unarchive`,
-  `thread_name_set`, `thread_compact_start`, `thread_rollback`
+  `thread_name_set`, `thread_compact_start`, `thread_rollback`, `thread_metadata_update`
 - Config: `config_read`, `config_value_write`, `config_batch_write`, `config_requirements_read`
 - Skills: `skills_list`, `skills_remote_list`, `skills_remote_export`, `skills_remote_read` (alias),
   `skills_remote_write` (alias), `skills_config_write`
 - Turns/review: `turn_start`, `turn_steer`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`, `experimental_feature_list`
 - Collaboration modes: `collaboration_mode_list` (experimental)
-- One-off commands: `command_exec`
+- Plugins: `plugin_list`, `plugin_install`, `plugin_uninstall`
+- One-off commands: `command_exec`, `command_exec_write`, `command_exec_resize`,
+  `command_exec_terminate`
 - MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
 - External agent config: `external_agent_config_detect`, `external_agent_config_import`
 - Windows sandbox: `windows_sandbox_setup_start`
@@ -332,6 +334,9 @@ for payload shapes and event semantics.
 
 Note: some endpoints and fields are gated behind an experimental capability; set
 `AppServerOptions(experimental_api_enabled=True)` to opt in.
+
+`ApprovalDecisions` also supports `permissions_request` for auto-responding to
+`item/permissions/requestApproval` server requests during `turn_session()`.
 
 `thread_list` supports `archived`, `sort_key`, and `source_kinds` filters, and `config_read` accepts an optional `cwd`
 to compute the effective layered config for a specific working directory.
@@ -585,6 +590,7 @@ Example scripts under `examples/`:
 - `hooks_streaming.py`: event hooks for streaming runs.
 - `notify_hook.py`: notify script for CLI callbacks.
 - `pydantic_ai_model_provider.py`: Codex as a PydanticAI model provider.
+- `pydantic_ai_model_provider_streaming.py`: live PydanticAI text streaming over `CodexModel`.
 - `pydantic_ai_handoff.py`: Codex as a PydanticAI tool.
 
 <a id="sandbox"></a>
@@ -634,12 +640,30 @@ result = agent.run_sync("What's 19 + 23? Use the add tool.")
 print(result.output)
 ```
 
+For live text streaming in a terminal or web UI:
+
+```python
+from pydantic_ai import Agent
+
+from codex_sdk.integrations.pydantic_ai_model import CodexModel
+
+agent = Agent(CodexModel(), output_type=str)
+
+async with agent.run_stream("Explain why the sky is blue.") as result:
+    async for delta in result.stream_text(delta=True, debounce_by=None):
+        print(delta, end="", flush=True)
+```
+
 How it works:
 - `CodexModel` builds a JSON schema envelope with `tool_calls` and `final`.
 - Codex emits tool calls as JSON strings; PydanticAI runs them.
 - If `allow_text_output` is true, Codex can place final text in `final`.
-- Streaming APIs (`Agent.run_stream_events()`, `Agent.run_stream_sync()`) are supported; Codex
-  emits streamed responses as a single chunk once the turn completes.
+- This SDK targets the current PydanticAI release line (`>=1.68.0,<2`).
+- `Agent.run_stream()`, `Agent.run_stream_events()`, and `Agent.run_stream_sync()`
+  work with `CodexModel`.
+- Text deltas are forwarded live from agent-message updates when Codex emits them, including
+  envelope-backed `final` text. Tool calls are forwarded as soon as Codex produces a valid
+  envelope update, and `streamed.get()` is reconciled to the canonical final turn result.
 
 Safety defaults (you can override with your own `ThreadOptions`):
 - `sandbox_mode="read-only"`

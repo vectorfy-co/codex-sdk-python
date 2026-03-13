@@ -81,6 +81,7 @@ class ApprovalDecisions:
 
     command_execution: Optional[Union[str, Mapping[str, Any]]] = None
     file_change: Optional[Union[str, Mapping[str, Any]]] = None
+    permissions_request: Optional[Union[str, Mapping[str, Any]]] = None
     execpolicy_amendment: Optional[Mapping[str, Any]] = None
 
 
@@ -265,6 +266,14 @@ class AppServerTurnSession:
             if decision is None:
                 return False
             payload = {"decision": _normalize_decision(decision, None)}
+            await self._client.respond(request.id, payload)
+            return True
+
+        if request.method == "item/permissions/requestApproval":
+            decision = self._approvals.permissions_request
+            if decision is None:
+                return False
+            payload = _normalize_permissions_request_decision(decision, request.params)
             await self._client.respond(request.id, payload)
             return True
 
@@ -666,6 +675,31 @@ class AppServerClient:
             "thread/rollback", {"threadId": thread_id, "numTurns": num_turns}
         )
 
+    async def thread_metadata_update(
+        self,
+        thread_id: str,
+        *,
+        git_info: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update persisted metadata for a thread.
+
+        Args:
+            thread_id: Identifier of the thread to update.
+            git_info: Optional Git metadata patch payload. Keys may be provided in either
+                snake_case or camelCase. `None` values are preserved so callers can clear
+                stored metadata fields.
+
+        Returns:
+            Result dictionary returned by the app-server for the metadata update operation.
+        """
+        payload: Dict[str, Any] = {"thread_id": thread_id}
+        if git_info is not None:
+            payload["git_info"] = _coerce_keys(dict(git_info), drop_none=False)
+        return await self._request_dict(
+            "thread/metadata/update", _coerce_keys(payload, drop_none=False)
+        )
+
     async def config_requirements_read(self) -> Dict[str, Any]:
         """Read config requirements metadata from the app-server."""
         return await self._request_dict("configRequirements/read")
@@ -957,13 +991,48 @@ class AppServerClient:
         """List supported collaboration modes from the app-server."""
         return await self._request_dict("collaborationMode/list", {})
 
+    async def plugin_list(
+        self, *, cwds: Optional[Sequence[Union[str, Path]]] = None
+    ) -> Dict[str, Any]:
+        """List available plugin marketplaces and plugins."""
+        params: Dict[str, Any] = {}
+        if cwds is not None:
+            params["cwds"] = [str(path) for path in cwds]
+        return await self._request_dict("plugin/list", params or None)
+
+    async def plugin_install(
+        self,
+        *,
+        marketplace_path: Union[str, Path],
+        plugin_name: str,
+    ) -> Dict[str, Any]:
+        """Install a plugin from a discovered marketplace."""
+        params = {
+            "marketplace_path": str(marketplace_path),
+            "plugin_name": plugin_name,
+        }
+        return await self._request_dict("plugin/install", _coerce_keys(params))
+
+    async def plugin_uninstall(self, *, plugin_id: str) -> Dict[str, Any]:
+        """Uninstall a previously installed plugin."""
+        return await self._request_dict("plugin/uninstall", {"pluginId": plugin_id})
+
     async def command_exec(
         self,
         *,
         command: Sequence[str],
         timeout_ms: Optional[int] = None,
         cwd: Optional[Union[str, Path]] = None,
+        disable_output_cap: Optional[bool] = None,
+        disable_timeout: Optional[bool] = None,
+        env: Optional[Mapping[str, Any]] = None,
+        output_bytes_cap: Optional[int] = None,
+        process_id: Optional[str] = None,
         sandbox_policy: Optional[Mapping[str, Any]] = None,
+        size: Optional[Mapping[str, int]] = None,
+        stream_stdin: Optional[bool] = None,
+        stream_stdout_stderr: Optional[bool] = None,
+        tty: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Execute a command via the app-server command execution endpoint."""
         params: Dict[str, Any] = {"command": list(command)}
@@ -971,9 +1040,58 @@ class AppServerClient:
             params["timeout_ms"] = timeout_ms
         if cwd is not None:
             params["cwd"] = str(cwd)
+        if disable_output_cap is not None:
+            params["disable_output_cap"] = disable_output_cap
+        if disable_timeout is not None:
+            params["disable_timeout"] = disable_timeout
+        if env is not None:
+            params["env"] = dict(env)
+        if output_bytes_cap is not None:
+            params["output_bytes_cap"] = output_bytes_cap
+        if process_id is not None:
+            params["process_id"] = process_id
         if sandbox_policy is not None:
             params["sandbox_policy"] = dict(sandbox_policy)
+        if size is not None:
+            params["size"] = dict(size)
+        if stream_stdin is not None:
+            params["stream_stdin"] = stream_stdin
+        if stream_stdout_stderr is not None:
+            params["stream_stdout_stderr"] = stream_stdout_stderr
+        if tty is not None:
+            params["tty"] = tty
         return await self._request_dict("command/exec", _coerce_keys(params))
+
+    async def command_exec_write(
+        self,
+        *,
+        process_id: str,
+        delta_base64: Optional[str] = None,
+        close_stdin: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Write stdin bytes to a streaming command/exec session."""
+        params = {
+            "process_id": process_id,
+            "delta_base64": delta_base64,
+            "close_stdin": close_stdin,
+        }
+        return await self._request_dict("command/exec/write", _coerce_keys(params))
+
+    async def command_exec_resize(
+        self,
+        *,
+        process_id: str,
+        size: Mapping[str, int],
+    ) -> Dict[str, Any]:
+        """Resize the PTY for a streaming command/exec session."""
+        params = {"process_id": process_id, "size": dict(size)}
+        return await self._request_dict("command/exec/resize", _coerce_keys(params))
+
+    async def command_exec_terminate(self, *, process_id: str) -> Dict[str, Any]:
+        """Terminate a previously started streaming command/exec session."""
+        return await self._request_dict(
+            "command/exec/terminate", {"processId": process_id}
+        )
 
     async def mcp_server_oauth_login(
         self, *, name: str, scopes: Optional[Sequence[str]] = None
@@ -1282,11 +1400,13 @@ def _normalize_text_elements(item: Dict[str, Any]) -> None:
     item["textElements"] = normalized
 
 
-def _coerce_keys(params: Mapping[str, Any]) -> Dict[str, Any]:
-    """Coerce snake_case keys to camelCase and drop None values."""
+def _coerce_keys(
+    params: Mapping[str, Any], *, drop_none: bool = True
+) -> Dict[str, Any]:
+    """Coerce snake_case keys to camelCase and optionally drop None values."""
     coerced: Dict[str, Any] = {}
     for key, value in params.items():
-        if value is None:
+        if value is None and drop_none:
             continue
         if "_" in key:
             key = _snake_to_camel(key)
@@ -1327,6 +1447,36 @@ def _normalize_decision(
     if "_" in normalized:
         normalized = _snake_to_camel(normalized)
     return normalized
+
+
+def _normalize_permissions_request_decision(
+    decision: Union[str, Mapping[str, Any]],
+    params: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Normalize permission-grant responses for `item/permissions/requestApproval`."""
+    if isinstance(decision, Mapping):
+        return dict(decision)
+    if not isinstance(decision, str):
+        raise CodexError("Permissions approval decision must be a string or mapping")
+
+    requested_permissions = {}
+    if isinstance(params, Mapping):
+        requested = params.get("permissions")
+        if isinstance(requested, Mapping):
+            requested_permissions = dict(requested)
+
+    normalized = decision.strip()
+    if normalized == "accept":
+        return {"permissions": requested_permissions, "scope": "turn"}
+    if normalized in {"accept_for_session", "acceptForSession"}:
+        return {"permissions": requested_permissions, "scope": "session"}
+    if normalized == "deny":
+        return {"permissions": {}, "scope": "turn"}
+
+    raise CodexError(
+        "Permissions approval decision must be 'accept', 'accept_for_session', "
+        "'acceptForSession', 'deny', or a mapping"
+    )
 
 
 def _extract_turn(notification: AppServerNotification) -> Optional[Dict[str, Any]]:

@@ -2,6 +2,32 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.114.0] - 2026-03-13
+
+### Added
+- App-server helpers for newly exposed protocol methods:
+  `thread_metadata_update`, `plugin_list`, `plugin_install`, `plugin_uninstall`,
+  `command_exec_write`, `command_exec_resize`, and `command_exec_terminate`.
+
+### Updated
+- `command_exec` now accepts the current 0.114.0 app-server parameters for interactive
+  sessions and output streaming: `disable_output_cap`, `disable_timeout`, `env`,
+  `output_bytes_cap`, `process_id`, `size`, `stream_stdin`, `stream_stdout_stderr`,
+  and `tty`.
+- `ApprovalDecisions`/`AppServerTurnSession` can now auto-handle
+  `item/permissions/requestApproval` requests via `permissions_request`.
+- `CodexModel` now streams live PydanticAI text/tool updates from app-server notifications when
+  Codex emits valid incremental envelope state, while keeping `streamed.get()` aligned with the
+  canonical final turn response.
+- The PydanticAI integration now targets the current release line only
+  (`pydantic-ai>=1.68.0,<2`) and uses the modern streaming API surface directly.
+- README app-server method coverage updated and SDK version set to 0.114.0.
+
+### Notes
+- Codex 0.114.0 adds plugin marketplace endpoints, thread metadata updates,
+  streaming `command/exec` control methods, hook lifecycle notifications, and
+  improved permissions handling in the app-server protocol.
+
 ## [0.107.0] - 2026-03-04
 
 ### Added

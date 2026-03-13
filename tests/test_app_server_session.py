@@ -303,6 +303,44 @@ async def test_turn_session_file_change_decision_none():
     assert pending.method == "item/fileChange/requestApproval"
 
 
+@pytest.mark.asyncio
+async def test_turn_session_auto_approves_permissions_request():
+    client = FakeAppServerClient()
+    session = AppServerTurnSession(
+        client,
+        thread_id="thr",
+        turn_id="turn",
+        approvals=ApprovalDecisions(permissions_request="accept_for_session"),
+    )
+    await session.start()
+    await client.requests.put(
+        AppServerRequest(
+            id=3,
+            method="item/permissions/requestApproval",
+            params={
+                "threadId": "thr",
+                "turnId": "turn",
+                "permissions": {
+                    "fileSystem": {"write": ["/tmp/project"]},
+                    "network": {"enabled": True},
+                },
+            },
+        )
+    )
+    await client.notifications.put(
+        AppServerNotification(method="turn/completed", params={"turn": {"id": "turn"}})
+    )
+
+    await session.wait()
+    assert client.respond_calls[0][1] == {
+        "permissions": {
+            "fileSystem": {"write": ["/tmp/project"]},
+            "network": {"enabled": True},
+        },
+        "scope": "session",
+    }
+
+
 def test_turn_session_is_turn_completed_false():
     client = FakeAppServerClient()
     session = AppServerTurnSession(client, thread_id="thr", turn_id="turn")

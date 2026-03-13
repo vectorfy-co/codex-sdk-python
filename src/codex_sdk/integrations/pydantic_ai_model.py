@@ -86,6 +86,8 @@ class _TurnAccumulationState:
     item_text_by_id: Dict[str, str] = field(default_factory=dict)
     last_updated_item_id: Optional[str] = None
     vendor_part_ids: Dict[str, int] = field(default_factory=dict)
+    streamed_tool_call_ids: set[str] = field(default_factory=set)
+    tool_call_vendor_part_ids: Dict[str, int] = field(default_factory=dict)
     next_vendor_part_id: int = 0
     usage: Optional[RequestUsage] = None
     turn_failed_message: Optional[str] = None
@@ -351,12 +353,52 @@ def _usage_from_mapping(raw: Any) -> Optional[RequestUsage]:
     details = (
         {"cached_input_tokens": cached_input_tokens} if cached_input_tokens else {}
     )
+    return _make_request_usage(
+        input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        output_tokens=output_tokens,
+        details=details,
+    )
+
+
+def _make_request_usage(
+    *,
+    input_tokens: int = 0,
+    cached_input_tokens: int = 0,
+    output_tokens: int = 0,
+    details: Optional[Dict[str, int]] = None,
+) -> RequestUsage:
+    """Build a usage object for the supported PydanticAI release line."""
+    normalized_details = details or {}
     return RequestUsage(
         input_tokens=input_tokens,
         cache_read_tokens=cached_input_tokens,
         output_tokens=output_tokens,
-        details=details,
+        details=normalized_details,
     )
+
+
+def _build_model_response(
+    *,
+    parts: List[Any],
+    usage: RequestUsage,
+    model_name: str,
+    provider_name: Optional[str],
+    thread_id: Optional[str],
+    timestamp: Optional[datetime] = None,
+) -> ModelResponse:
+    """Build a ModelResponse for the supported PydanticAI release line."""
+    provider_details = {"thread_id": thread_id} if thread_id else {}
+    kwargs: Dict[str, Any] = dict(
+        parts=parts,
+        usage=usage,
+        model_name=model_name,
+        provider_name=provider_name,
+        provider_details=provider_details or None,
+    )
+    if timestamp is not None:
+        kwargs["timestamp"] = timestamp
+    return ModelResponse(**kwargs)
 
 
 def _notification_items(notification: AppServerNotification) -> List[Dict[str, Any]]:
@@ -454,6 +496,14 @@ def _extract_turn_text(turn: Optional[Mapping[str, Any]]) -> str:
     return ""
 
 
+def _extract_envelope(text: str) -> Optional[Dict[str, Any]]:
+    """Extract a validated tool/text envelope from raw agent text."""
+    parsed = _extract_json_object(text)
+    if _is_envelope_candidate(parsed):
+        return parsed
+    return None
+
+
 def _extract_turn_failure_message(notification: AppServerNotification) -> Optional[str]:
     """Extract a failure message from turn failure notifications."""
     if notification.method != "turn/failed":
@@ -493,8 +543,7 @@ class CodexStreamedResponse(StreamedResponse):
             model_request_parameters: PydanticAI request parameters for this response.
             model_name: Model identifier to expose to PydanticAI.
             provider_name: Provider/system identifier for metadata.
-            parts: Optional precomputed parts for compatibility with non-incremental
-                stream construction.
+            parts: Optional precomputed parts for non-incremental stream construction.
             thread_id: Optional Codex thread identifier for provider details.
             usage: Optional request usage snapshot.
         """
@@ -507,6 +556,9 @@ class CodexStreamedResponse(StreamedResponse):
         self._instruction_queue: "asyncio.Queue[Any]" = asyncio.Queue()
         self._stream_error: Optional[BaseException] = None
         self._precomputed_parts: Optional[List[Any]] = list(parts) if parts else None
+        self._completed_parts: Optional[List[Any]] = None
+        if hasattr(self, "provider_details"):
+            self.provider_details = {"thread_id": thread_id} if thread_id else None
 
     def push_text_delta(self, *, vendor_part_id: Any, content: str) -> None:
         """Queue a text-delta instruction."""
@@ -537,6 +589,7 @@ class CodexStreamedResponse(StreamedResponse):
         *,
         usage: Optional[RequestUsage] = None,
         thread_id: Optional[str] = None,
+        parts: Optional[Sequence[Any]] = None,
         error: Optional[BaseException] = None,
     ) -> None:
         """Mark the stream as complete and publish terminal metadata."""
@@ -544,6 +597,10 @@ class CodexStreamedResponse(StreamedResponse):
             self._usage = usage
         if thread_id is not None:
             self._thread_id = thread_id
+            if hasattr(self, "provider_details"):
+                self.provider_details = {"thread_id": thread_id}
+        if parts is not None:
+            self._completed_parts = list(parts)
         if error is not None:
             self._stream_error = error
         self._instruction_queue.put_nowait(self._STREAM_END)
@@ -636,16 +693,13 @@ class CodexStreamedResponse(StreamedResponse):
 
     def get(self) -> ModelResponse:
         """Return a ModelResponse view over currently collected stream parts."""
-        provider_details: Dict[str, Any] = {}
-        if self._thread_id:
-            provider_details["thread_id"] = self._thread_id
-        return ModelResponse(
-            parts=self._parts_manager.get_parts(),
+        return _build_model_response(
+            parts=self._completed_parts or self._parts_manager.get_parts(),
+            usage=self.usage(),
             model_name=self.model_name,
             provider_name=self.provider_name,
+            thread_id=self._thread_id,
             timestamp=self.timestamp,
-            usage=self.usage(),
-            provider_details=provider_details,
         )
 
     @property
@@ -772,7 +826,9 @@ class CodexModel(Model):
         self, thread_options: Optional[ThreadOptions]
     ) -> ThreadOptions:
         """Apply model-provider defaults to thread options."""
-        options = replace(thread_options) if thread_options is not None else ThreadOptions()
+        options = (
+            replace(thread_options) if thread_options is not None else ThreadOptions()
+        )
 
         if options.skip_git_repo_check is None:
             options.skip_git_repo_check = True
@@ -972,6 +1028,7 @@ class CodexModel(Model):
         state: _TurnAccumulationState,
         streamed: Optional[CodexStreamedResponse],
         allow_stream_text: bool,
+        stream_raw_text: bool,
     ) -> None:
         """Update accumulated state from one app-server notification."""
         failure = _extract_turn_failure_message(notification)
@@ -995,7 +1052,39 @@ class CodexModel(Model):
                 continue
 
             state.latest_agent_text = text
+            envelope = _extract_envelope(text)
+
+            if streamed is not None and envelope is not None:
+                for call in _tool_calls_from_envelope(envelope):
+                    if call.tool_call_id in state.streamed_tool_call_ids:
+                        continue
+                    vendor_part_id = state.tool_call_vendor_part_ids.get(
+                        call.tool_call_id
+                    )
+                    if vendor_part_id is None:
+                        vendor_part_id = state.next_vendor_part_id
+                        state.next_vendor_part_id += 1
+                        state.tool_call_vendor_part_ids[call.tool_call_id] = (
+                            vendor_part_id
+                        )
+                    state.streamed_tool_call_ids.add(call.tool_call_id)
+                    streamed.push_tool_call(
+                        vendor_part_id=vendor_part_id,
+                        tool_name=call.tool_name,
+                        args=call.arguments_json,
+                        tool_call_id=call.tool_call_id,
+                    )
+
             if not allow_stream_text or streamed is None:
+                continue
+
+            if envelope is not None:
+                stream_text = _final_from_envelope(envelope)
+            elif stream_raw_text:
+                stream_text = text
+            else:
+                stream_text = ""
+            if not stream_text:
                 continue
 
             item_id_raw = item.get("id")
@@ -1003,11 +1092,11 @@ class CodexModel(Model):
                 str(item_id_raw) if item_id_raw is not None else "__agent_message__"
             )
             previous = state.item_text_by_id.get(item_id, "")
-            if text.startswith(previous):
-                delta = text[len(previous) :]
+            if stream_text.startswith(previous):
+                delta = stream_text[len(previous) :]
             else:
-                delta = text
-            state.item_text_by_id[item_id] = text
+                delta = stream_text
+            state.item_text_by_id[item_id] = stream_text
             state.last_updated_item_id = item_id
             if not delta:
                 continue
@@ -1032,8 +1121,10 @@ class CodexModel(Model):
         state = _TurnAccumulationState()
 
         allow_stream_text = bool(
-            streamed is not None
-            and model_request_parameters.allow_text_output
+            streamed is not None and model_request_parameters.allow_text_output
+        )
+        stream_raw_text = bool(
+            allow_stream_text
             and not model_request_parameters.function_tools
             and not model_request_parameters.output_tools
         )
@@ -1044,6 +1135,7 @@ class CodexModel(Model):
                 state=state,
                 streamed=streamed,
                 allow_stream_text=allow_stream_text,
+                stream_raw_text=stream_raw_text,
             )
 
         final_turn = await session.wait()
@@ -1055,7 +1147,7 @@ class CodexModel(Model):
         if not final_text:
             final_text = state.latest_agent_text
 
-        parsed_json = _extract_json_object(final_text) if final_text else None
+        parsed_json = _extract_envelope(final_text) if final_text else None
         parsed_envelope = parsed_json if _is_envelope_candidate(parsed_json) else None
 
         parts: List[Any] = []
@@ -1070,8 +1162,13 @@ class CodexModel(Model):
                     )
                 )
                 if streamed is not None:
+                    if call.tool_call_id in state.streamed_tool_call_ids:
+                        continue
+                    vendor_part_id = state.tool_call_vendor_part_ids.get(
+                        call.tool_call_id, index
+                    )
                     streamed.push_tool_call(
-                        vendor_part_id=index,
+                        vendor_part_id=vendor_part_id,
                         tool_name=call.tool_name,
                         args=call.arguments_json,
                         tool_call_id=call.tool_call_id,
@@ -1172,12 +1269,12 @@ class CodexModel(Model):
                 self._messages_seen = 0
                 raise
 
-        return ModelResponse(
+        return _build_model_response(
             parts=parts,
             usage=usage,
             model_name=self.model_name,
             provider_name=self.system,
-            provider_details={"thread_id": thread_id},
+            thread_id=thread_id,
         )
 
     @asynccontextmanager
@@ -1206,8 +1303,7 @@ class CodexModel(Model):
                         model_request_parameters=model_request_parameters,
                         streamed=streamed,
                     )
-                    del parts
-                    streamed.finish(usage=usage, thread_id=thread_id)
+                    streamed.finish(usage=usage, thread_id=thread_id, parts=parts)
                 except Exception as exc:  # pragma: no cover - defensive
                     self._thread_id = None
                     self._messages_seen = 0

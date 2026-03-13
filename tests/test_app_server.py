@@ -399,6 +399,20 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "thread/rollback", {"thread": {"id": "t1"}})
     assert payload["params"] == {"threadId": "t1", "numTurns": 2}
 
+    task = asyncio.create_task(
+        client.thread_metadata_update(
+            "t1",
+            git_info={"branch": "main", "origin_url": None, "sha": "abc123"},
+        )
+    )
+    _, payload = await expect_request(
+        task, "thread/metadata/update", {"thread": {"id": "t1"}}
+    )
+    assert payload["params"] == {
+        "threadId": "t1",
+        "gitInfo": {"branch": "main", "originUrl": None, "sha": "abc123"},
+    }
+
     task = asyncio.create_task(client.config_read(include_layers=True, cwd=tmp_path))
     _, payload = await expect_request(
         task, "config/read", {"config": {}, "origins": {}}
@@ -517,22 +531,91 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
     assert payload["params"] == {}
 
+    task = asyncio.create_task(client.plugin_list(cwds=[tmp_path]))
+    _, payload = await expect_request(task, "plugin/list", {"marketplaces": []})
+    assert payload["params"] == {"cwds": [str(tmp_path)]}
+
+    task = asyncio.create_task(
+        client.plugin_install(
+            marketplace_path=tmp_path / "marketplace",
+            plugin_name="test-plugin",
+        )
+    )
+    _, payload = await expect_request(task, "plugin/install", {"appsNeedingAuth": []})
+    assert payload["params"] == {
+        "marketplacePath": str(tmp_path / "marketplace"),
+        "pluginName": "test-plugin",
+    }
+
+    task = asyncio.create_task(client.plugin_uninstall(plugin_id="plugin_1"))
+    _, payload = await expect_request(task, "plugin/uninstall", {"ok": True})
+    assert payload["params"] == {"pluginId": "plugin_1"}
+
     task = asyncio.create_task(
         client.command_exec(
             command=["echo", "hi"],
             timeout_ms=10,
             cwd=tmp_path,
+            disable_output_cap=True,
+            disable_timeout=True,
+            env={"FOO": "bar", "REMOVE_ME": None},
+            output_bytes_cap=2048,
+            process_id="proc_1",
             sandbox_policy={"allow": True},
+            size={"rows": 24, "cols": 80},
+            stream_stdin=True,
+            stream_stdout_stderr=True,
+            tty=True,
         )
     )
     _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
-    assert payload["params"]["command"] == ["echo", "hi"]
-    assert payload["params"]["sandboxPolicy"] == {"allow": True}
+    assert payload["params"] == {
+        "command": ["echo", "hi"],
+        "timeoutMs": 10,
+        "cwd": str(tmp_path),
+        "disableOutputCap": True,
+        "disableTimeout": True,
+        "env": {"FOO": "bar", "REMOVE_ME": None},
+        "outputBytesCap": 2048,
+        "processId": "proc_1",
+        "sandboxPolicy": {"allow": True},
+        "size": {"rows": 24, "cols": 80},
+        "streamStdin": True,
+        "streamStdoutStderr": True,
+        "tty": True,
+    }
 
     # Cover command_exec with only required args.
     task = asyncio.create_task(client.command_exec(command=["echo", "hi"]))
     _, payload = await expect_request(task, "command/exec", {"exitCode": 0})
     assert payload["params"] == {"command": ["echo", "hi"]}
+
+    task = asyncio.create_task(
+        client.command_exec_write(
+            process_id="proc_1",
+            delta_base64="aGVsbG8=",
+            close_stdin=True,
+        )
+    )
+    _, payload = await expect_request(task, "command/exec/write", {"ok": True})
+    assert payload["params"] == {
+        "processId": "proc_1",
+        "deltaBase64": "aGVsbG8=",
+        "closeStdin": True,
+    }
+
+    task = asyncio.create_task(
+        client.command_exec_resize(process_id="proc_1", size={"rows": 30, "cols": 120})
+    )
+    _, payload = await expect_request(task, "command/exec/resize", {"ok": True})
+    assert payload["params"] == {
+        "processId": "proc_1",
+        "size": {"rows": 30, "cols": 120},
+    }
+
+    task = asyncio.create_task(client.command_exec_terminate(process_id="proc_1"))
+    _, payload = await expect_request(task, "command/exec/terminate", {"ok": True})
+    assert payload["params"] == {"processId": "proc_1"}
 
     task = asyncio.create_task(
         client.mcp_server_oauth_login(name="server", scopes=["a"])
