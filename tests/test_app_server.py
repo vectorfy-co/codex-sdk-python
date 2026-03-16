@@ -630,6 +630,19 @@ async def test_app_server_methods_and_input_normalization(
     }
 
     task = asyncio.create_task(
+        client.fs_copy(
+            source_path=tmp_path / "source.txt",
+            destination_path=tmp_path / "dest.txt",
+        )
+    )
+    _, payload = await expect_request(task, "fs/copy", {})
+    assert payload["params"] == {
+        "sourcePath": str(tmp_path / "source.txt"),
+        "destinationPath": str(tmp_path / "dest.txt"),
+    }
+    assert "recursive" not in payload["params"]
+
+    task = asyncio.create_task(
         client.fs_create_directory(path=tmp_path / "nested", recursive=True)
     )
     _, payload = await expect_request(task, "fs/createDirectory", {})
@@ -637,6 +650,11 @@ async def test_app_server_methods_and_input_normalization(
         "path": str(tmp_path / "nested"),
         "recursive": True,
     }
+
+    task = asyncio.create_task(client.fs_create_directory(path=tmp_path / "nested"))
+    _, payload = await expect_request(task, "fs/createDirectory", {})
+    assert payload["params"] == {"path": str(tmp_path / "nested")}
+    assert "recursive" not in payload["params"]
 
     task = asyncio.create_task(client.fs_get_metadata(path=tmp_path / "source.txt"))
     _, payload = await expect_request(
@@ -669,6 +687,12 @@ async def test_app_server_methods_and_input_normalization(
         "force": True,
         "recursive": False,
     }
+
+    task = asyncio.create_task(client.fs_remove(path=tmp_path / "source.txt"))
+    _, payload = await expect_request(task, "fs/remove", {})
+    assert payload["params"] == {"path": str(tmp_path / "source.txt")}
+    assert "force" not in payload["params"]
+    assert "recursive" not in payload["params"]
 
     task = asyncio.create_task(
         client.fs_write_file(path=tmp_path / "source.txt", data_base64="aGk=")

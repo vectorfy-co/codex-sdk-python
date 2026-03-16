@@ -1319,7 +1319,7 @@ async def test_codex_model_thread_start_params_include_extended_options():
 
 
 @pytest.mark.asyncio
-async def test_codex_model_thread_start_params_omit_unset_optional_options():
+async def test_codex_model_thread_start_params_omit_unset_optional_options() -> None:
     app = FakeAppServerClient(
         notifications=[],
         final_turn={

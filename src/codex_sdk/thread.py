@@ -39,10 +39,11 @@ from .items import (
     TodoListItem,
     WebSearchItem,
 )
-from .options import CodexOptions, ThreadOptions, TurnOptions
+from .options import CodexOptions, ModelReasoningEffort, ThreadOptions, TurnOptions
 from .telemetry import span
 
 T = TypeVar("T")
+_MODEL_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 @dataclass
@@ -530,6 +531,8 @@ class Thread:
                     if isinstance(alt_reasoning_effort, str)
                     else None
                 )
+            if reasoning_effort not in _MODEL_REASONING_EFFORTS:
+                reasoning_effort = None
             return CollabToolCallItem(
                 id=data["id"],
                 type="collab_tool_call",
@@ -538,7 +541,7 @@ class Thread:
                 receiver_thread_ids=receiver_thread_ids,
                 prompt=prompt if isinstance(prompt, str) else None,
                 model=model if isinstance(model, str) else None,
-                reasoning_effort=reasoning_effort,
+                reasoning_effort=cast(Optional[ModelReasoningEffort], reasoning_effort),
                 agents_states=agents_states,
                 status=data["status"],
             )

@@ -7,6 +7,8 @@ Based on item types from codex-rs/exec/src/exec_events.rs
 from dataclasses import dataclass
 from typing import Any, List, Literal, Mapping, Optional, Union
 
+from .options import ModelReasoningEffort
+
 # The status of a command execution
 CommandExecutionStatus = Literal["in_progress", "completed", "failed", "declined"]
 
@@ -162,7 +164,7 @@ class CollabToolCallItem:
     agents_states: Mapping[str, CollabAgentState]
     status: CollabToolCallStatus
     model: Optional[str] = None
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[ModelReasoningEffort] = None
 
 
 @dataclass

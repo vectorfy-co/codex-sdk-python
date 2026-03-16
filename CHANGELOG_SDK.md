@@ -2,7 +2,7 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## [0.115.0] - 2026-03-17
+## [0.115.0] - Unreleased
 
 ### Added
 - App-server helpers for newly exposed 0.115.0 filesystem RPCs:
