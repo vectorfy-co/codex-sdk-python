@@ -23,12 +23,19 @@ McpToolCallStatus = Literal["in_progress", "completed", "failed"]
 CollabToolCallStatus = Literal["in_progress", "completed", "failed"]
 
 # Supported collaboration tools
-CollabTool = Literal["spawn_agent", "send_input", "wait", "close_agent"]
+CollabTool = Literal[
+    "spawn_agent",
+    "send_input",
+    "wait",
+    "wait_agent",
+    "close_agent",
+]
 
 # The status of a collaboration agent
 CollabAgentStatus = Literal[
     "pending_init",
     "running",
+    "interrupted",
     "completed",
     "errored",
     "shutdown",
@@ -154,6 +161,8 @@ class CollabToolCallItem:
     prompt: Optional[str]
     agents_states: Mapping[str, CollabAgentState]
     status: CollabToolCallStatus
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 @dataclass

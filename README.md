@@ -8,7 +8,7 @@ Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CL
       <td><strong>Lifecycle</strong></td>
       <td>
         <a href="#ci-cd"><img src="https://img.shields.io/badge/CI%2FCD-Active-16a34a?style=flat&logo=githubactions&logoColor=white" alt="CI/CD badge" /></a>
-        <img src="https://img.shields.io/badge/Release-0.114.1-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
+        <img src="https://img.shields.io/badge/Release-0.115.0-6b7280?style=flat&logo=pypi&logoColor=white" alt="Release badge" />
         <a href="#license"><img src="https://img.shields.io/badge/License-Apache--2.0-0f766e?style=flat&logo=apache&logoColor=white" alt="License badge" /></a>
       </td>
     </tr>
@@ -207,7 +207,7 @@ ThreadOptions(
     sandbox_mode="workspace-write",
     working_directory="/path/to/project",
     skip_git_repo_check=True,
-    model_reasoning_effort="high",
+    model_reasoning_effort="none",
     model_instructions_file="/path/to/instructions.md",
     model_personality="friendly",
     max_threads=4,
@@ -222,7 +222,8 @@ ThreadOptions(
     connectors_enabled=True,
     responses_websockets_enabled=True,
     request_compression_enabled=True,
-    approval_policy="on-request",
+    approval_policy="granular",
+    approvals_reviewer="guardian_subagent",
     additional_directories=["../shared"],
     config_overrides={"analytics.enabled": True},
 )
@@ -233,7 +234,8 @@ Important mappings to the Codex CLI:
 - `working_directory` maps to `--cd`.
 - `additional_directories` maps to repeated `--add-dir`.
 - `skip_git_repo_check` maps to `--skip-git-repo-check`.
-- `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
+- `model_reasoning_effort` maps to `--config model_reasoning_effort=...`
+  (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`).
 - `model_instructions_file` maps to `--config model_instructions_file=...`.
 - `model_personality` maps to `--config model_personality=...`.
 - `max_threads` maps to `--config agents.max_threads=...`.
@@ -251,7 +253,10 @@ Important mappings to the Codex CLI:
 - `responses_websockets_enabled` maps to `--config features.responses_websockets=...`.
 - `request_compression_enabled` maps to `--config features.enable_request_compression=...`.
 - `feature_overrides` maps to `--config features.<key>=...` (explicit options take precedence).
-- `approval_policy` maps to `--config approval_policy=...`.
+- `approval_policy` maps to `--config approval_policy=...`
+  (`never`, `on-request`, `on-failure`, `untrusted`, `granular`).
+- `approvals_reviewer` maps to `--config approvals_reviewer=...` for app-server-backed
+  approval routing (`user`, `guardian_subagent`).
 - `config_overrides` maps to repeated `--config key=value` entries.
 
 Note: `skills_enabled` is deprecated in Codex 0.80+ (skills are always enabled).
@@ -319,7 +324,9 @@ The SDK also exposes helpers for most app-server endpoints:
 - Turns/review: `turn_start`, `turn_steer`, `turn_interrupt`, `review_start`, `turn_session`
 - Models: `model_list`, `experimental_feature_list`
 - Collaboration modes: `collaboration_mode_list` (experimental)
-- Plugins: `plugin_list`, `plugin_install`, `plugin_uninstall`
+- Plugins: `plugin_list`, `plugin_read`, `plugin_install`, `plugin_uninstall`
+- Filesystem (experimental): `fs_copy`, `fs_create_directory`, `fs_get_metadata`,
+  `fs_read_directory`, `fs_read_file`, `fs_remove`, `fs_write_file`
 - One-off commands: `command_exec`, `command_exec_write`, `command_exec_resize`,
   `command_exec_terminate`
 - MCP auth/status: `mcp_server_oauth_login`, `mcp_server_refresh`, `mcp_server_status_list`
@@ -340,6 +347,10 @@ Note: some endpoints and fields are gated behind an experimental capability; set
 
 `thread_list` supports `archived`, `sort_key`, and `source_kinds` filters, and `config_read` accepts an optional `cwd`
 to compute the effective layered config for a specific working directory.
+
+Codex 0.115.0 also adds experimental granular approval routing (`approval_policy="granular"`)
+and guardian reviewer selection via `approvals_reviewer`; the app-server helpers pass those
+through with the existing snake_case to camelCase normalization.
 
 ### Observability (OTEL) and notify
 
@@ -612,7 +623,8 @@ The SDK forwards sandbox and approval controls directly to `codex exec`.
 Additional controls:
 - `working_directory`: restricts where the CLI starts and what it can access.
 - `additional_directories`: allowlist extra folders when using `workspace-write`.
-- `approval_policy`: `never`, `on-request`, `on-failure`, `untrusted`.
+- `approval_policy`: `never`, `on-request`, `on-failure`, `untrusted`, `granular`.
+- `approvals_reviewer`: `user`, `guardian_subagent` for app-server approval routing.
 - `network_access_enabled`: toggles network access in workspace-write sandbox.
 - `web_search_mode`: toggles web search (`disabled`, `cached`, `live`).
 

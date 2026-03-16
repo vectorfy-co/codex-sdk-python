@@ -29,6 +29,7 @@ from .config_overrides import encode_config_overrides
 from .exceptions import CodexAbortError, CodexCLIError, CodexError
 from .options import (
     ApprovalMode,
+    ApprovalsReviewer,
     ModelPersonality,
     ModelReasoningEffort,
     SandboxMode,
@@ -76,6 +77,7 @@ class CodexExecArgs:
     request_compression_enabled: Optional[bool] = None
     feature_overrides: Optional[Mapping[str, bool]] = None
     approval_policy: Optional[ApprovalMode] = None
+    approvals_reviewer: Optional[ApprovalsReviewer] = None
     signal: Optional[AbortSignal] = None
     config_overrides: Optional[Mapping[str, Any]] = None
 
@@ -324,6 +326,11 @@ class CodexExec:
         if args.approval_policy:
             command_args.extend(
                 ["--config", f'approval_policy="{args.approval_policy}"']
+            )
+
+        if args.approvals_reviewer:
+            command_args.extend(
+                ["--config", f'approvals_reviewer="{args.approvals_reviewer}"']
             )
 
         if args.thread_id:

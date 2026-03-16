@@ -364,7 +364,7 @@ class TestOptions:
             sandbox_mode="read-only",
             working_directory="/tmp",
             skip_git_repo_check=True,
-            model_reasoning_effort="high",
+            model_reasoning_effort="none",
             model_instructions_file="/tmp/instructions.md",
             model_personality="friendly",
             max_threads=3,
@@ -383,7 +383,8 @@ class TestOptions:
             responses_websockets_enabled=True,
             request_compression_enabled=True,
             feature_overrides={"web_search_cached": False},
-            approval_policy="on-request",
+            approval_policy="granular",
+            approvals_reviewer="guardian_subagent",
             additional_directories=["../backend"],
         )
 
@@ -391,7 +392,7 @@ class TestOptions:
         assert options.sandbox_mode == "read-only"
         assert options.working_directory == "/tmp"
         assert options.skip_git_repo_check is True
-        assert options.model_reasoning_effort == "high"
+        assert options.model_reasoning_effort == "none"
         assert options.model_instructions_file == "/tmp/instructions.md"
         assert options.model_personality == "friendly"
         assert options.max_threads == 3
@@ -410,7 +411,8 @@ class TestOptions:
         assert options.responses_websockets_enabled is True
         assert options.request_compression_enabled is True
         assert options.feature_overrides == {"web_search_cached": False}
-        assert options.approval_policy == "on-request"
+        assert options.approval_policy == "granular"
+        assert options.approvals_reviewer == "guardian_subagent"
         assert options.additional_directories == ["../backend"]
 
     def test_turn_options(self):

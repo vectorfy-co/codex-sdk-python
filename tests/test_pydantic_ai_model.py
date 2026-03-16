@@ -172,7 +172,8 @@ def test_codex_model_does_not_override_explicit_thread_options() -> None:
     thread_options = importlib.import_module("codex_sdk.options").ThreadOptions(
         skip_git_repo_check=False,
         sandbox_mode="workspace-write",
-        approval_policy="on-request",
+        approval_policy="granular",
+        approvals_reviewer="guardian_subagent",
         web_search_mode="live",
         network_access_enabled=True,
     )
@@ -183,7 +184,8 @@ def test_codex_model_does_not_override_explicit_thread_options() -> None:
     assert model.model_name == "codex"
     assert thread_options.skip_git_repo_check is False
     assert thread_options.sandbox_mode == "workspace-write"
-    assert thread_options.approval_policy == "on-request"
+    assert thread_options.approval_policy == "granular"
+    assert thread_options.approvals_reviewer == "guardian_subagent"
     assert thread_options.web_search_mode == "live"
     assert thread_options.network_access_enabled is True
 
@@ -1247,6 +1249,7 @@ async def test_codex_model_thread_start_params_include_extended_options():
         sandbox_mode="workspace-write",
         working_directory="/tmp",
         skip_git_repo_check=False,
+        model_reasoning_effort="none",
         model_instructions_file="/tmp/instructions.md",
         model_personality="friendly",
         max_threads=3,
@@ -1264,7 +1267,8 @@ async def test_codex_model_thread_start_params_include_extended_options():
         responses_websockets_enabled=True,
         request_compression_enabled=True,
         feature_overrides={"experimental": True},
-        approval_policy="on-request",
+        approval_policy="granular",
+        approvals_reviewer="guardian_subagent",
         additional_directories=["/tmp/a", "/tmp/b"],
         config_overrides={"feature": "on"},
     )
@@ -1290,6 +1294,7 @@ async def test_codex_model_thread_start_params_include_extended_options():
     assert sent["cwd"] == "/tmp"
     assert sent["sandbox_mode"] == "workspace-write"
     assert sent["skip_git_repo_check"] is False
+    assert sent["model_reasoning_effort"] == "none"
     assert sent["model_instructions_file"] == "/tmp/instructions.md"
     assert sent["model_personality"] == "friendly"
     assert sent["max_threads"] == 3
@@ -1307,9 +1312,30 @@ async def test_codex_model_thread_start_params_include_extended_options():
     assert sent["responses_websockets_enabled"] is True
     assert sent["request_compression_enabled"] is True
     assert sent["feature_overrides"] == {"experimental": True}
-    assert sent["approval_policy"] == "on-request"
+    assert sent["approval_policy"] == "granular"
+    assert sent["approvals_reviewer"] == "guardian_subagent"
     assert sent["additional_directories"] == ["/tmp/a", "/tmp/b"]
     assert sent["config_overrides"] == {"feature": "on"}
+
+
+@pytest.mark.asyncio
+async def test_codex_model_thread_start_params_omit_unset_optional_options():
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-omit",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "ok",
+        },
+    )
+    model = CodexModel(app_server=app, thread_options=ThreadOptions())
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    await model.request([ModelRequest(parts=[UserPromptPart("omit")])], None, params)
+
+    sent = app.thread_start_calls[0]
+    assert "approvals_reviewer" not in sent
+    assert "model_reasoning_effort" not in sent
 
 
 @pytest.mark.asyncio

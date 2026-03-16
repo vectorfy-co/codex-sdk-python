@@ -2,6 +2,31 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.115.0] - 2026-03-17
+
+### Added
+- App-server helpers for newly exposed 0.115.0 filesystem RPCs:
+  `fs_copy`, `fs_create_directory`, `fs_get_metadata`, `fs_read_directory`,
+  `fs_read_file`, `fs_remove`, and `fs_write_file`.
+- App-server helper `plugin_read` for fetching plugin metadata from a marketplace
+  before install.
+
+### Updated
+- `CollabToolCallItem` now reflects the upstream collaboration payload by exposing
+  optional `model` and `reasoning_effort` fields for spawned agents.
+- Collaboration item parsing now accepts the renamed `wait_agent` tool and the
+  new `interrupted` collaboration agent status while keeping legacy `wait`
+  compatibility for older threads.
+- The typed SDK surface now exposes `model_reasoning_effort="none"`,
+  `approval_policy="granular"`, and `approvals_reviewer` so the CLI-backed
+  thread API and `CodexModel` match the upstream 0.115.0 thread-start contract.
+- README app-server method coverage and release version updated to 0.115.0.
+
+### Notes
+- Codex 0.115.0 adds experimental filesystem app-server RPCs, `plugin/read`,
+  guardian approval review flows, granular approval routing, and the `wait_agent`
+  collaboration tool rename.
+
 ## [0.114.1] - 2026-03-13
 
 ### Updated

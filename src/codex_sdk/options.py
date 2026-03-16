@@ -8,11 +8,12 @@ from typing import Any, List, Literal, Mapping, Optional, Union
 
 from .abort import AbortSignal
 
-ApprovalMode = Literal["never", "on-request", "on-failure", "untrusted"]
+ApprovalMode = Literal["never", "on-request", "on-failure", "untrusted", "granular"]
+ApprovalsReviewer = Literal["user", "guardian_subagent"]
 
 SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 
-ModelReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
+ModelReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 WebSearchMode = Literal["disabled", "cached", "live"]
 ModelPersonality = Literal["friendly", "pragmatic", "none"]
 
@@ -76,7 +77,10 @@ class ThreadOptions:
         responses_websockets_enabled: Enable/disable responses websocket transport.
         request_compression_enabled: Enable/disable request body compression.
         feature_overrides: Arbitrary feature flag overrides (key -> bool).
-        approval_policy: Approval policy for tool execution.
+        approval_policy: Approval policy for tool execution, including experimental
+            granular approval routing.
+        approvals_reviewer: Optional approval reviewer routing target for app-server
+            approval flows.
         additional_directories: Additional directories to add to the sandbox.
         config_overrides: Optional config overrides passed as `--config key=value` for this
             thread's invocations. Values are encoded as TOML literals.
@@ -153,6 +157,9 @@ class ThreadOptions:
 
     # Approval policy for tool execution
     approval_policy: Optional[ApprovalMode] = None
+
+    # Optional approval reviewer routing target
+    approvals_reviewer: Optional[ApprovalsReviewer] = None
 
     # Additional directories to add to the sandbox
     additional_directories: Optional[List[str]] = None

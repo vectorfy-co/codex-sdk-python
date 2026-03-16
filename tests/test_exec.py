@@ -287,7 +287,7 @@ async def test_exec_passes_config_and_repeated_flags(
     args = CodexExecArgs(
         input="hello",
         thread_id="thread-123",
-        model_reasoning_effort="high",
+        model_reasoning_effort="none",
         model_instructions_file=instructions_path,
         model_personality="pragmatic",
         max_threads=5,
@@ -303,7 +303,8 @@ async def test_exec_passes_config_and_repeated_flags(
         connectors_enabled=True,
         responses_websockets_enabled=False,
         request_compression_enabled=False,
-        approval_policy="on-request",
+        approval_policy="granular",
+        approvals_reviewer="guardian_subagent",
         additional_directories=["../backend", "/tmp/shared"],
         images=["/tmp/one.png", "/tmp/two.jpg"],
     )
@@ -314,7 +315,7 @@ async def test_exec_passes_config_and_repeated_flags(
     cmd_list = captured["cmd"]
     assert cmd_list[:2] == ["codex-binary", "exec"]
     assert "--config" in cmd_list
-    assert 'model_reasoning_effort="high"' in cmd_list
+    assert 'model_reasoning_effort="none"' in cmd_list
     assert f'model_instructions_file="{instructions_path}"' in cmd_list
     assert 'model_personality="pragmatic"' in cmd_list
     assert "agents.max_threads=5" in cmd_list
@@ -329,7 +330,8 @@ async def test_exec_passes_config_and_repeated_flags(
     assert "features.connectors=true" in cmd_list
     assert "features.responses_websockets=false" in cmd_list
     assert "features.enable_request_compression=false" in cmd_list
-    assert 'approval_policy="on-request"' in cmd_list
+    assert 'approval_policy="granular"' in cmd_list
+    assert 'approvals_reviewer="guardian_subagent"' in cmd_list
 
     add_dir_values = [
         cmd_list[i + 1] for i, v in enumerate(cmd_list[:-1]) if v == "--add-dir"
