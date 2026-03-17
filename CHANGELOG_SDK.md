@@ -2,7 +2,7 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
-## [0.115.1] - Unreleased
+## [0.115.1] - 2026-03-17
 
 ### Updated
 - Refreshed the locked optional `pydantic-ai` dependency graph to upgrade the
