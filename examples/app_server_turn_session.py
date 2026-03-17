@@ -7,7 +7,7 @@ from codex_sdk import ApprovalDecisions, AppServerClient, AppServerOptions
 
 async def main() -> None:
     async with AppServerClient(AppServerOptions()) as app:
-        thread = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread = await app.thread_start(model="gpt-5.4", cwd=".")
         thread_id = thread["thread"]["id"]
 
         session = await app.turn_session(

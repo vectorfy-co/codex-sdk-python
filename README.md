@@ -1,6 +1,8 @@
 # ![Codex SDK Python](https://img.shields.io/badge/Codex%20SDK-Python-1D4ED8?style=for-the-badge&logo=python&logoColor=white)
 
-Embed the Codex agent in Python workflows. This SDK wraps the bundled `codex` CLI, streams JSONL events over stdin/stdout, and exposes structured, typed results.
+Embed the Codex agent in Python workflows. This SDK supports both the `codex exec`
+JSONL path and the persistent app-server JSON-RPC path, and exposes structured,
+typed results for each.
 
 <div align="left">
   <table>
@@ -97,7 +99,7 @@ from codex_sdk import AppServerClient, AppServerOptions, ApprovalDecisions
 
 async def main() -> None:
     async with AppServerClient(AppServerOptions()) as app:
-        thread = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread = await app.thread_start(model="gpt-5.4", cwd=".")
         thread_id = thread["thread"]["id"]
         session = await app.turn_session(
             thread_id,
@@ -203,11 +205,11 @@ codex = Codex(
 from codex_sdk import ThreadOptions
 
 ThreadOptions(
-    model="gpt-5-codex-high",
+    model="gpt-5.4",
     sandbox_mode="workspace-write",
     working_directory="/path/to/project",
     skip_git_repo_check=True,
-    model_reasoning_effort="none",
+    model_reasoning_effort="medium",
     model_instructions_file="/path/to/instructions.md",
     model_personality="friendly",
     max_threads=4,
@@ -234,8 +236,12 @@ Important mappings to the Codex CLI:
 - `working_directory` maps to `--cd`.
 - `additional_directories` maps to repeated `--add-dir`.
 - `skip_git_repo_check` maps to `--skip-git-repo-check`.
-- `model_reasoning_effort` maps to `--config model_reasoning_effort=...`
-  (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`).
+- `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
+  Typed SDK values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+  In Codex itself, the presets exposed for `--config model_reasoning_effort=...`
+  vary by the selected model/provider.
+  For example, current frontier coding models typically expose `low`, `medium`,
+  `high`, `xhigh`, while `gpt-5.1-codex-mini` exposes `medium` and `high`.
 - `model_instructions_file` maps to `--config model_instructions_file=...`.
 - `model_personality` maps to `--config model_personality=...`.
 - `max_threads` maps to `--config agents.max_threads=...`.
@@ -287,7 +293,7 @@ from codex_sdk import AppServerClient, AppServerOptions
 
 async def main() -> None:
     async with AppServerClient(AppServerOptions()) as app:
-        thread = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread = await app.thread_start(model="gpt-5.4", cwd=".")
         thread_id = thread["thread"]["id"]
         await app.turn_start(
             thread_id,
@@ -748,32 +754,43 @@ If Logfire is missing or not initialized, the span context manager is a no-op.
 <a id="acheature"></a>
 ## ![Architecture](https://img.shields.io/badge/Architecture-Stack%20map-1f2937?style=for-the-badge&logo=serverless&logoColor=white)
 
-### System components
+### Transport split
+
+The SDK still ships two separate transports. The Thread API runs through
+`codex exec`, while app-server-backed integrations use `codex app-server`
+directly and do not fall back to `codex exec --experimental-json`.
 
 ```mermaid
 flowchart LR
   subgraph App[Your Python App]
     U[User Code]
     T[Thread API]
+    M[CodexModel / AppServerClient]
   end
 
-  subgraph SDK[Codex SDK]
-    C[Codex]
+  subgraph ThreadTransport[Thread transport]
+    C[Codex / Thread]
     E[CodexExec]
     P[Event Parser]
+    X["codex exec --experimental-json"]
   end
 
-  subgraph CLI[Bundled Codex CLI]
-    X["codex exec --experimental-json"]
+  subgraph AppServerTransport[App-server transport]
+    A[App-server client]
+    S["codex app-server"]
   end
 
   FS[(Filesystem)]
   NET[(Network)]
 
   U --> T --> C --> E --> X
+  U --> M --> A --> S
   X -->|JSONL events| P --> T
+  S -->|JSON-RPC notifications| A --> M
   X --> FS
   X --> NET
+  S --> FS
+  S --> NET
 ```
 
 ### Streaming event lifecycle
@@ -805,21 +822,29 @@ sequenceDiagram
 sequenceDiagram
   participant Agent as PydanticAI Agent
   participant Model as CodexModel
-  participant SDK as Codex SDK
-  participant CLI as codex exec
+  participant App as AppServerClient
+  participant CLI as codex app-server
   participant Tools as User Tools
 
   Agent->>Model: request(messages, tools)
-  Model->>SDK: start_thread + run_json(prompt, output_schema)
-  SDK->>CLI: codex exec --output-schema
-  CLI-->>SDK: JSON envelope {tool_calls, final}
-  SDK-->>Model: ParsedTurn
-  alt tool_calls present
-    Model-->>Agent: ToolCallPart(s)
+  alt no cached thread id
+    Model->>App: thread_start(...)
+    App->>CLI: thread/start over JSON-RPC
+    CLI-->>App: thread metadata
+    App-->>Model: thread.id
+  else cached thread id
+    Model-->>Model: reuse cached thread id
+  end
+  Model->>App: turn_session(input, approvals)
+  App->>CLI: turn/start over JSON-RPC
+  CLI-->>App: item/updated + turn/completed
+  App-->>Model: notifications + final turn
+  alt tool calls emitted
+    Model-->>Agent: ToolCallPart(s) / tool deltas
     Agent->>Tools: execute tool(s)
     Tools-->>Agent: results
   else final text allowed
-    Model-->>Agent: TextPart(final)
+    Model-->>Agent: TextPart(final) / text deltas
   end
 ```
 

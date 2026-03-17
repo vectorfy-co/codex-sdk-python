@@ -7,7 +7,7 @@ from codex_sdk import AppServerClient, AppServerOptions
 
 async def main() -> None:
     async with AppServerClient(AppServerOptions()) as app:
-        thread_resp = await app.thread_start(model="gpt-5-codex-high", cwd=".")
+        thread_resp = await app.thread_start(model="gpt-5.4", cwd=".")
         thread_id = thread_resp["thread"]["id"]
 
         await app.turn_start(

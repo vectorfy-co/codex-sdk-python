@@ -19,7 +19,7 @@ async def main() -> None:
             }
         )
     )
-    thread = codex.start_thread(ThreadOptions(model="gpt-5-codex-high"))
+    thread = codex.start_thread(ThreadOptions(model="gpt-5.4"))
     turn = await thread.run("Summarize the repository and suggest next steps.")
     print(turn.final_response)
 
