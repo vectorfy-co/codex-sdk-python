@@ -39,10 +39,11 @@ from .items import (
     TodoListItem,
     WebSearchItem,
 )
-from .options import CodexOptions, ThreadOptions, TurnOptions
+from .options import CodexOptions, ModelReasoningEffort, ThreadOptions, TurnOptions
 from .telemetry import span
 
 T = TypeVar("T")
+_MODEL_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 @dataclass
@@ -337,6 +338,7 @@ class Thread:
                     request_compression_enabled=self._thread_options.request_compression_enabled,
                     feature_overrides=self._thread_options.feature_overrides,
                     approval_policy=self._thread_options.approval_policy,
+                    approvals_reviewer=self._thread_options.approvals_reviewer,
                     config_overrides=merge_config_overrides(
                         self._options.config_overrides,
                         self._thread_options.config_overrides,
@@ -520,6 +522,17 @@ class Thread:
                     )
 
             prompt = data.get("prompt")
+            model = data.get("model")
+            reasoning_effort = data.get("reasoning_effort")
+            if not isinstance(reasoning_effort, str):
+                alt_reasoning_effort = data.get("reasoningEffort")
+                reasoning_effort = (
+                    alt_reasoning_effort
+                    if isinstance(alt_reasoning_effort, str)
+                    else None
+                )
+            if reasoning_effort not in _MODEL_REASONING_EFFORTS:
+                reasoning_effort = None
             return CollabToolCallItem(
                 id=data["id"],
                 type="collab_tool_call",
@@ -527,6 +540,8 @@ class Thread:
                 sender_thread_id=data["sender_thread_id"],
                 receiver_thread_ids=receiver_thread_ids,
                 prompt=prompt if isinstance(prompt, str) else None,
+                model=model if isinstance(model, str) else None,
+                reasoning_effort=cast(Optional[ModelReasoningEffort], reasoning_effort),
                 agents_states=agents_states,
                 status=data["status"],
             )

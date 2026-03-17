@@ -931,6 +931,8 @@ class CodexModel(Model):
             params["feature_overrides"] = _jsonable(options.feature_overrides)
         if options.approval_policy is not None:
             params["approval_policy"] = options.approval_policy
+        if options.approvals_reviewer is not None:
+            params["approvals_reviewer"] = options.approvals_reviewer
         if options.additional_directories is not None:
             params["additional_directories"] = list(options.additional_directories)
         if options.config_overrides is not None:

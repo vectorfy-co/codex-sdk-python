@@ -314,12 +314,14 @@ def test_parse_item_branches():
         {
             "id": "col",
             "type": "collab_tool_call",
-            "tool": "spawn_agent",
+            "tool": "wait_agent",
             "sender_thread_id": "thr_1",
             "receiver_thread_ids": ["thr_2", "thr_3"],
             "prompt": "do it",
+            "model": "gpt-5.4",
+            "reasoning_effort": "high",
             "agents_states": {
-                "thr_2": {"status": "running"},
+                "thr_2": {"status": "interrupted"},
                 "thr_3": {"status": "completed", "message": "ok"},
             },
             "status": "in_progress",
@@ -328,12 +330,14 @@ def test_parse_item_branches():
     assert collab_item == CollabToolCallItem(
         id="col",
         type="collab_tool_call",
-        tool="spawn_agent",
+        tool="wait_agent",
         sender_thread_id="thr_1",
         receiver_thread_ids=["thr_2", "thr_3"],
         prompt="do it",
+        model="gpt-5.4",
+        reasoning_effort="high",
         agents_states={
-            "thr_2": CollabAgentState(status="running", message=None),
+            "thr_2": CollabAgentState(status="interrupted", message=None),
             "thr_3": CollabAgentState(status="completed", message="ok"),
         },
         status="in_progress",
@@ -492,6 +496,8 @@ async def test_turn_filters_work():
                 sender_thread_id="thr_1",
                 receiver_thread_ids=["thr_2"],
                 prompt=None,
+                model=None,
+                reasoning_effort=None,
                 agents_states={},
                 status="completed",
             ),
@@ -794,7 +800,30 @@ def test_parse_item_handles_collab_tool_call_with_missing_collections() -> None:
     assert item.type == "collab_tool_call"
     assert item.receiver_thread_ids == []
     assert item.prompt is None
+    assert item.model is None
+    assert item.reasoning_effort is None
     assert item.agents_states == {}
+
+
+def test_parse_item_handles_collab_tool_call_camel_case_reasoning_effort() -> None:
+    thread = Thread(FakeExecNoop(), CodexOptions(), ThreadOptions())
+    item = thread._parse_item(
+        {
+            "id": "item-3",
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "sender_thread_id": "t0",
+            "receiver_thread_ids": ["t1"],
+            "prompt": "run it",
+            "model": "gpt-5.4",
+            "reasoningEffort": "medium",
+            "agents_states": {},
+            "status": "completed",
+        }
+    )
+    assert item.type == "collab_tool_call"
+    assert item.model == "gpt-5.4"
+    assert item.reasoning_effort == "medium"
 
 
 @pytest.mark.asyncio

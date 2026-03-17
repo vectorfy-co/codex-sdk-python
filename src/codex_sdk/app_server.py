@@ -1065,9 +1065,87 @@ class AppServerClient:
         }
         return await self._request_dict("plugin/install", _coerce_keys(params))
 
+    async def plugin_read(
+        self,
+        *,
+        marketplace_path: Union[str, Path],
+        plugin_name: str,
+    ) -> Dict[str, Any]:
+        """Read metadata for a plugin from a discovered marketplace."""
+        params = {
+            "marketplace_path": str(marketplace_path),
+            "plugin_name": plugin_name,
+        }
+        return await self._request_dict("plugin/read", _coerce_keys(params))
+
     async def plugin_uninstall(self, *, plugin_id: str) -> Dict[str, Any]:
         """Uninstall a previously installed plugin."""
         return await self._request_dict("plugin/uninstall", {"pluginId": plugin_id})
+
+    async def fs_copy(
+        self,
+        *,
+        source_path: Union[str, Path],
+        destination_path: Union[str, Path],
+        recursive: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Copy a file or directory via the experimental filesystem API."""
+        params: Dict[str, Any] = {
+            "source_path": str(source_path),
+            "destination_path": str(destination_path),
+        }
+        if recursive is not None:
+            params["recursive"] = recursive
+        return await self._request_dict("fs/copy", _coerce_keys(params))
+
+    async def fs_create_directory(
+        self,
+        *,
+        path: Union[str, Path],
+        recursive: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Create a directory via the experimental filesystem API."""
+        params: Dict[str, Any] = {"path": str(path)}
+        if recursive is not None:
+            params["recursive"] = recursive
+        return await self._request_dict("fs/createDirectory", _coerce_keys(params))
+
+    async def fs_get_metadata(self, *, path: Union[str, Path]) -> Dict[str, Any]:
+        """Read filesystem metadata for a path via the experimental filesystem API."""
+        return await self._request_dict("fs/getMetadata", {"path": str(path)})
+
+    async def fs_read_directory(self, *, path: Union[str, Path]) -> Dict[str, Any]:
+        """List a directory via the experimental filesystem API."""
+        return await self._request_dict("fs/readDirectory", {"path": str(path)})
+
+    async def fs_read_file(self, *, path: Union[str, Path]) -> Dict[str, Any]:
+        """Read a file via the experimental filesystem API."""
+        return await self._request_dict("fs/readFile", {"path": str(path)})
+
+    async def fs_remove(
+        self,
+        *,
+        path: Union[str, Path],
+        force: Optional[bool] = None,
+        recursive: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Remove a file or directory via the experimental filesystem API."""
+        params: Dict[str, Any] = {"path": str(path)}
+        if force is not None:
+            params["force"] = force
+        if recursive is not None:
+            params["recursive"] = recursive
+        return await self._request_dict("fs/remove", _coerce_keys(params))
+
+    async def fs_write_file(
+        self,
+        *,
+        path: Union[str, Path],
+        data_base64: str,
+    ) -> Dict[str, Any]:
+        """Write a file via the experimental filesystem API."""
+        params = {"path": str(path), "data_base64": data_base64}
+        return await self._request_dict("fs/writeFile", _coerce_keys(params))
 
     async def command_exec(
         self,

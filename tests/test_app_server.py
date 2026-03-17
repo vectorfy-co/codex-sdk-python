@@ -599,9 +599,109 @@ async def test_app_server_methods_and_input_normalization(
         "pluginName": "test-plugin",
     }
 
+    task = asyncio.create_task(
+        client.plugin_read(
+            marketplace_path=tmp_path / "marketplace",
+            plugin_name="test-plugin",
+        )
+    )
+    _, payload = await expect_request(task, "plugin/read", {"plugin": {}})
+    assert payload["params"] == {
+        "marketplacePath": str(tmp_path / "marketplace"),
+        "pluginName": "test-plugin",
+    }
+
     task = asyncio.create_task(client.plugin_uninstall(plugin_id="plugin_1"))
     _, payload = await expect_request(task, "plugin/uninstall", {"ok": True})
     assert payload["params"] == {"pluginId": "plugin_1"}
+
+    task = asyncio.create_task(
+        client.fs_copy(
+            source_path=tmp_path / "source.txt",
+            destination_path=tmp_path / "dest.txt",
+            recursive=False,
+        )
+    )
+    _, payload = await expect_request(task, "fs/copy", {})
+    assert payload["params"] == {
+        "sourcePath": str(tmp_path / "source.txt"),
+        "destinationPath": str(tmp_path / "dest.txt"),
+        "recursive": False,
+    }
+
+    task = asyncio.create_task(
+        client.fs_copy(
+            source_path=tmp_path / "source.txt",
+            destination_path=tmp_path / "dest.txt",
+        )
+    )
+    _, payload = await expect_request(task, "fs/copy", {})
+    assert payload["params"] == {
+        "sourcePath": str(tmp_path / "source.txt"),
+        "destinationPath": str(tmp_path / "dest.txt"),
+    }
+    assert "recursive" not in payload["params"]
+
+    task = asyncio.create_task(
+        client.fs_create_directory(path=tmp_path / "nested", recursive=True)
+    )
+    _, payload = await expect_request(task, "fs/createDirectory", {})
+    assert payload["params"] == {
+        "path": str(tmp_path / "nested"),
+        "recursive": True,
+    }
+
+    task = asyncio.create_task(client.fs_create_directory(path=tmp_path / "nested"))
+    _, payload = await expect_request(task, "fs/createDirectory", {})
+    assert payload["params"] == {"path": str(tmp_path / "nested")}
+    assert "recursive" not in payload["params"]
+
+    task = asyncio.create_task(client.fs_get_metadata(path=tmp_path / "source.txt"))
+    _, payload = await expect_request(
+        task,
+        "fs/getMetadata",
+        {
+            "isDirectory": False,
+            "isFile": True,
+            "sizeBytes": 2,
+            "createdAtMs": 1,
+            "modifiedAtMs": 2,
+        },
+    )
+    assert payload["params"] == {"path": str(tmp_path / "source.txt")}
+
+    task = asyncio.create_task(client.fs_read_directory(path=tmp_path))
+    _, payload = await expect_request(task, "fs/readDirectory", {"entries": []})
+    assert payload["params"] == {"path": str(tmp_path)}
+
+    task = asyncio.create_task(client.fs_read_file(path=tmp_path / "source.txt"))
+    _, payload = await expect_request(task, "fs/readFile", {"dataBase64": "aGk="})
+    assert payload["params"] == {"path": str(tmp_path / "source.txt")}
+
+    task = asyncio.create_task(
+        client.fs_remove(path=tmp_path / "source.txt", force=True, recursive=False)
+    )
+    _, payload = await expect_request(task, "fs/remove", {})
+    assert payload["params"] == {
+        "path": str(tmp_path / "source.txt"),
+        "force": True,
+        "recursive": False,
+    }
+
+    task = asyncio.create_task(client.fs_remove(path=tmp_path / "source.txt"))
+    _, payload = await expect_request(task, "fs/remove", {})
+    assert payload["params"] == {"path": str(tmp_path / "source.txt")}
+    assert "force" not in payload["params"]
+    assert "recursive" not in payload["params"]
+
+    task = asyncio.create_task(
+        client.fs_write_file(path=tmp_path / "source.txt", data_base64="aGk=")
+    )
+    _, payload = await expect_request(task, "fs/writeFile", {})
+    assert payload["params"] == {
+        "path": str(tmp_path / "source.txt"),
+        "dataBase64": "aGk=",
+    }
 
     task = asyncio.create_task(
         client.command_exec(
