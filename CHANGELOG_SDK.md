@@ -2,6 +2,16 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.115.1] - Unreleased
+
+### Updated
+- Refreshed the locked optional `pydantic-ai` dependency graph to upgrade the
+  transitive `PyJWT` dependency to `2.12.1`, addressing the open GitHub
+  security advisory on `uv.lock` without changing the SDK API surface.
+- Added explicit least-privilege `GITHUB_TOKEN` permissions to the CI workflow
+  so the open CodeQL workflow-permissions alerts no longer rely on repository
+  defaults.
+
 ## [0.115.0] - 2026-03-17
 
 ### Added
