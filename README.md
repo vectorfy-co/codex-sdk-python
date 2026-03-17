@@ -754,7 +754,11 @@ If Logfire is missing or not initialized, the span context manager is a no-op.
 <a id="acheature"></a>
 ## ![Architecture](https://img.shields.io/badge/Architecture-Stack%20map-1f2937?style=for-the-badge&logo=serverless&logoColor=white)
 
-### System components
+### Transport split
+
+The SDK still ships two separate transports. The Thread API runs through
+`codex exec`, while app-server-backed integrations use `codex app-server`
+directly and do not fall back to `codex exec --experimental-json`.
 
 ```mermaid
 flowchart LR
@@ -764,15 +768,15 @@ flowchart LR
     M[CodexModel / AppServerClient]
   end
 
-  subgraph SDK[Codex SDK]
-    C[Codex]
+  subgraph ThreadTransport[Thread transport]
+    C[Codex / Thread]
     E[CodexExec]
     P[Event Parser]
-    A[App-server client]
+    X["codex exec --experimental-json"]
   end
 
-  subgraph CLI[Bundled Codex CLI]
-    X["codex exec --experimental-json"]
+  subgraph AppServerTransport[App-server transport]
+    A[App-server client]
     S["codex app-server"]
   end
 
@@ -823,7 +827,14 @@ sequenceDiagram
   participant Tools as User Tools
 
   Agent->>Model: request(messages, tools)
-  Model->>App: thread_start / thread_resume
+  alt no cached thread id
+    Model->>App: thread_start(...)
+    App->>CLI: thread/start over JSON-RPC
+    CLI-->>App: thread metadata
+    App-->>Model: thread.id
+  else cached thread id
+    Model-->>Model: reuse cached thread id
+  end
   Model->>App: turn_session(input, approvals)
   App->>CLI: turn/start over JSON-RPC
   CLI-->>App: item/updated + turn/completed
