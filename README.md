@@ -237,10 +237,11 @@ Important mappings to the Codex CLI:
 - `additional_directories` maps to repeated `--add-dir`.
 - `skip_git_repo_check` maps to `--skip-git-repo-check`.
 - `model_reasoning_effort` maps to `--config model_reasoning_effort=...`.
-  The typed SDK accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
-  but the presets exposed by Codex depend on the selected model/provider.
-  Current frontier coding models typically expose `low`, `medium`, `high`,
-  `xhigh`, while `gpt-5.1-codex-mini` exposes `medium` and `high`.
+  Typed SDK values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+  In Codex itself, the presets exposed for `--config model_reasoning_effort=...`
+  vary by the selected model/provider.
+  For example, current frontier coding models typically expose `low`, `medium`,
+  `high`, `xhigh`, while `gpt-5.1-codex-mini` exposes `medium` and `high`.
 - `model_instructions_file` maps to `--config model_instructions_file=...`.
 - `model_personality` maps to `--config model_personality=...`.
 - `max_threads` maps to `--config agents.max_threads=...`.
