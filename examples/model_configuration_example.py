@@ -3,7 +3,7 @@
 Model Configuration and API Endpoints Example
 
 This example demonstrates how to:
-1. Use different Codex models (gpt-5-codex, gpt-5 variants)
+1. Use different current Codex model families and reasoning presets
 2. Configure OpenAI-compatible API endpoints
 3. Set up custom model providers
 4. Compare different model behaviors
@@ -20,15 +20,18 @@ async def test_different_models():
     print("TESTING DIFFERENT CODEX MODELS")
     print("=" * 60)
 
-    # Available models
+    # Representative models from the current Codex menu.
     models = [
-        ("gpt-5-codex", "low", "Fastest Codex model"),
-        ("gpt-5-codex", "medium", "Balanced Codex model"),
-        ("gpt-5-codex", "high", "Most capable Codex model (current default)"),
-        ("gpt-5", "minimal", "Fastest responses, limited reasoning"),
-        ("gpt-5", "low", "Balances speed with reasoning"),
-        ("gpt-5", "medium", "Default GPT-5, solid balance"),
-        ("gpt-5", "high", "Maximizes reasoning depth"),
+        ("gpt-5.4", "medium", "Latest frontier agentic coding model"),
+        ("gpt-5.4", "xhigh", "Latest frontier model with extra high reasoning"),
+        ("gpt-5.3-codex", "medium", "Frontier Codex-optimized coding model"),
+        ("gpt-5.3-codex", "xhigh", "Codex-optimized model with deeper reasoning"),
+        ("gpt-5.3-codex-spark", "high", "Ultra-fast coding model"),
+        (
+            "gpt-5.1-codex-mini",
+            "high",
+            "Cheaper codex model with max supported reasoning",
+        ),
     ]
 
     codex = Codex()
@@ -41,7 +44,8 @@ async def test_different_models():
 
         # Create thread with specific model
         thread_options = ThreadOptions(
-            model=f"{model}-{effort}",
+            model=model,
+            model_reasoning_effort=effort,
             sandbox_mode="danger-full-access",
             working_directory=".",
             skip_git_repo_check=True,
@@ -94,13 +98,13 @@ async def test_openai_compatible_endpoints():
         {
             "name": "OpenAI Direct",
             "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o",
+            "model": "gpt-5.4",
             "env_key": "OPENAI_API_KEY",
         },
         {
             "name": "Azure OpenAI",
             "base_url": "https://your-resource.openai.azure.com/openai",
-            "model": "gpt-4o",
+            "model": "gpt-5.4",
             "env_key": "AZURE_OPENAI_API_KEY",
         },
         {
@@ -132,7 +136,7 @@ async def test_openai_compatible_endpoints():
 # Example config.toml for OpenAI-compatible endpoints
 
 # Use a custom model provider
-model = "gpt-4o"
+model = "gpt-5.4"
 model_provider = "openai-direct"
 
 # Define custom model providers
@@ -172,11 +176,11 @@ async def test_model_comparison():
 
     # Test different models on the same task
     models_to_compare = [
-        "gpt-5-codex-low",
-        "gpt-5-codex-medium",
-        "gpt-5-codex-high",
-        "gpt-5-minimal",
-        "gpt-5-medium",
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.2",
+        "gpt-5.1-codex-mini",
     ]
 
     task = "Explain the difference between Python's list and tuple data structures. Provide examples and use cases."
@@ -237,29 +241,24 @@ async def demonstrate_model_selection_guidelines():
     guidelines = """
 CHOOSING THE RIGHT MODEL:
 
-GPT-5-CODEX MODELS (Specialized for coding):
-- gpt-5-codex-low:    Fast coding tasks, simple scripts, quick fixes
-- gpt-5-codex-medium: Balanced coding tasks, moderate complexity
-- gpt-5-codex-high:   Complex coding tasks, architecture decisions, debugging
-
-GPT-5 MODELS (General purpose):
-- gpt-5-minimal:      Fast responses, simple tasks, basic Q&A
-- gpt-5-low:          Quick explanations, straightforward queries
-- gpt-5-medium:       General tasks, balanced reasoning
-- gpt-5-high:         Complex problems, deep reasoning, analysis
+CURRENT FRONTIER / CODEX MODEL FAMILIES:
+- gpt-5.4:               Latest frontier agentic coding model
+- gpt-5.3-codex:         Frontier Codex-optimized coding model
+- gpt-5.3-codex-spark:   Ultra-fast coding model
+- gpt-5.2 / gpt-5.2-codex: Balanced alternatives
+- gpt-5.1-codex-mini:    Cheaper codex model
 
 PERFORMANCE CHARACTERISTICS:
-- Speed: minimal > low > medium > high
-- Reasoning: minimal < low < medium < high
-- Cost: minimal < low < medium < high (typically)
+- Most current frontier coding models expose: low, medium, high, xhigh
+- gpt-5.1-codex-mini exposes: medium, high
+- Speed generally decreases as reasoning depth increases
+- Cost generally increases as reasoning depth increases
 
 USE CASE RECOMMENDATIONS:
-- Quick coding fixes: gpt-5-codex-low
-- Code reviews: gpt-5-codex-medium
-- System architecture: gpt-5-codex-high
-- Simple questions: gpt-5-minimal
-- General tasks: gpt-5-medium
-- Complex analysis: gpt-5-high
+- Default coding example: gpt-5.4 with medium reasoning
+- Fast feedback loops: gpt-5.3-codex-spark
+- Deep architecture/debugging: gpt-5.4 or gpt-5.3-codex with xhigh
+- Lower-cost codex usage: gpt-5.1-codex-mini
 
 OPENAI-COMPATIBLE ENDPOINTS:
 - Use for custom models (Claude, Llama, etc.)
@@ -289,8 +288,8 @@ async def main():
             """
 Key Takeaways:
 - Choose models based on task complexity and speed requirements
-- Codex models are optimized for coding tasks
-- GPT-5 models are general purpose with different reasoning levels
+- Prefer gpt-5.4 in examples when you want the current frontier coding model
+- Reasoning presets depend on the selected model
 - OpenAI-compatible endpoints allow using custom models
 - Configure endpoints in ~/.codex/config.toml
 - Test different models to find the best fit for your use case
