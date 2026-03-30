@@ -46,6 +46,145 @@ T = TypeVar("T")
 _MODEL_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
+def parse_thread_item_payload(data: Mapping[str, Any]) -> ThreadItem:
+    """Convert an item payload mapping into the corresponding typed ThreadItem."""
+    from .items import (
+        AgentMessageItem,
+        CollabAgentState,
+        CollabAgentStatus,
+        CollabToolCallItem,
+        CommandExecutionItem,
+        ErrorItem,
+        FileChangeItem,
+        FileUpdateChange,
+        McpToolCallItem,
+        McpToolCallItemError,
+        McpToolCallItemResult,
+        ReasoningItem,
+        TodoItem,
+        TodoListItem,
+        WebSearchItem,
+    )
+
+    item_type = data.get("type")
+
+    if item_type == "agent_message":
+        return AgentMessageItem(id=data["id"], type="agent_message", text=data["text"])
+    elif item_type == "reasoning":
+        return ReasoningItem(id=data["id"], type="reasoning", text=data["text"])
+    elif item_type == "command_execution":
+        return CommandExecutionItem(
+            id=data["id"],
+            type="command_execution",
+            command=data["command"],
+            aggregated_output=data["aggregated_output"],
+            exit_code=data.get("exit_code"),
+            status=data["status"],
+        )
+    elif item_type == "file_change":
+        changes = [
+            FileUpdateChange(path=change["path"], kind=change["kind"])
+            for change in data["changes"]
+        ]
+        return FileChangeItem(
+            id=data["id"],
+            type="file_change",
+            changes=changes,
+            status=data["status"],
+        )
+    elif item_type == "mcp_tool_call":
+        result_data = data.get("result")
+        result = None
+        if isinstance(result_data, dict):
+            content = result_data.get("content", [])
+            structured_content = result_data.get("structured_content")
+            result = McpToolCallItemResult(
+                content=list(content) if isinstance(content, list) else [],
+                structured_content=structured_content,
+            )
+
+        error_data = data.get("error")
+        error = None
+        if isinstance(error_data, dict) and "message" in error_data:
+            error = McpToolCallItemError(message=str(error_data["message"]))
+
+        return McpToolCallItem(
+            id=data["id"],
+            type="mcp_tool_call",
+            server=data["server"],
+            tool=data["tool"],
+            status=data["status"],
+            arguments=data.get("arguments"),
+            result=result,
+            error=error,
+        )
+    elif item_type == "collab_tool_call":
+        raw_receiver_ids = data.get("receiver_thread_ids")
+        receiver_thread_ids: List[str] = []
+        if isinstance(raw_receiver_ids, list):
+            receiver_thread_ids = [
+                str(entry) for entry in raw_receiver_ids if isinstance(entry, str)
+            ]
+
+        raw_agents_states = data.get("agents_states")
+        agents_states: Dict[str, CollabAgentState] = {}
+        if isinstance(raw_agents_states, dict):
+            for key, value in raw_agents_states.items():
+                if not isinstance(key, str) or not isinstance(value, dict):
+                    continue
+                status = value.get("status")
+                if not isinstance(status, str):
+                    continue
+                message = value.get("message")
+                agents_states[key] = CollabAgentState(
+                    status=cast(CollabAgentStatus, status),
+                    message=message if isinstance(message, str) else None,
+                )
+
+        prompt = data.get("prompt")
+        model = data.get("model")
+        reasoning_effort = data.get("reasoning_effort")
+        if not isinstance(reasoning_effort, str):
+            alt_reasoning_effort = data.get("reasoningEffort")
+            reasoning_effort = (
+                alt_reasoning_effort if isinstance(alt_reasoning_effort, str) else None
+            )
+        if reasoning_effort not in _MODEL_REASONING_EFFORTS:
+            reasoning_effort = None
+        return CollabToolCallItem(
+            id=data["id"],
+            type="collab_tool_call",
+            tool=data["tool"],
+            sender_thread_id=data["sender_thread_id"],
+            receiver_thread_ids=receiver_thread_ids,
+            prompt=prompt if isinstance(prompt, str) else None,
+            model=model if isinstance(model, str) else None,
+            reasoning_effort=cast(Optional[ModelReasoningEffort], reasoning_effort),
+            agents_states=agents_states,
+            status=data["status"],
+        )
+    elif item_type == "web_search":
+        query = data.get("query", "")
+        if not isinstance(query, str):
+            query = ""
+        return WebSearchItem(
+            id=data["id"],
+            type="web_search",
+            query=query,
+            action=data.get("action"),
+        )
+    elif item_type == "todo_list":
+        items = [
+            TodoItem(text=item["text"], completed=item["completed"])
+            for item in data["items"]
+        ]
+        return TodoListItem(id=data["id"], type="todo_list", items=items)
+    elif item_type == "error":
+        return ErrorItem(id=data["id"], type="error", message=data["message"])
+    else:
+        raise CodexParseError(f"Unknown item type: {item_type}")
+
+
 @dataclass
 class Turn:
     """Completed turn."""
@@ -426,145 +565,7 @@ class Thread:
         Raises:
             CodexParseError: If the item's "type" is not recognized.
         """
-        from .items import (
-            AgentMessageItem,
-            CollabAgentState,
-            CollabAgentStatus,
-            CollabToolCallItem,
-            CommandExecutionItem,
-            ErrorItem,
-            FileChangeItem,
-            FileUpdateChange,
-            McpToolCallItem,
-            McpToolCallItemError,
-            McpToolCallItemResult,
-            ReasoningItem,
-            TodoItem,
-            TodoListItem,
-            WebSearchItem,
-        )
-
-        item_type = data.get("type")
-
-        if item_type == "agent_message":
-            return AgentMessageItem(
-                id=data["id"], type="agent_message", text=data["text"]
-            )
-        elif item_type == "reasoning":
-            return ReasoningItem(id=data["id"], type="reasoning", text=data["text"])
-        elif item_type == "command_execution":
-            return CommandExecutionItem(
-                id=data["id"],
-                type="command_execution",
-                command=data["command"],
-                aggregated_output=data["aggregated_output"],
-                exit_code=data.get("exit_code"),
-                status=data["status"],
-            )
-        elif item_type == "file_change":
-            changes = [
-                FileUpdateChange(path=change["path"], kind=change["kind"])
-                for change in data["changes"]
-            ]
-            return FileChangeItem(
-                id=data["id"],
-                type="file_change",
-                changes=changes,
-                status=data["status"],
-            )
-        elif item_type == "mcp_tool_call":
-            result_data = data.get("result")
-            result = None
-            if isinstance(result_data, dict):
-                content = result_data.get("content", [])
-                structured_content = result_data.get("structured_content")
-                result = McpToolCallItemResult(
-                    content=list(content) if isinstance(content, list) else [],
-                    structured_content=structured_content,
-                )
-
-            error_data = data.get("error")
-            error = None
-            if isinstance(error_data, dict) and "message" in error_data:
-                error = McpToolCallItemError(message=str(error_data["message"]))
-
-            return McpToolCallItem(
-                id=data["id"],
-                type="mcp_tool_call",
-                server=data["server"],
-                tool=data["tool"],
-                status=data["status"],
-                arguments=data.get("arguments"),
-                result=result,
-                error=error,
-            )
-        elif item_type == "collab_tool_call":
-            raw_receiver_ids = data.get("receiver_thread_ids")
-            receiver_thread_ids: List[str] = []
-            if isinstance(raw_receiver_ids, list):
-                receiver_thread_ids = [
-                    str(entry) for entry in raw_receiver_ids if isinstance(entry, str)
-                ]
-
-            raw_agents_states = data.get("agents_states")
-            agents_states: Dict[str, CollabAgentState] = {}
-            if isinstance(raw_agents_states, dict):
-                for key, value in raw_agents_states.items():
-                    if not isinstance(key, str) or not isinstance(value, dict):
-                        continue
-                    status = value.get("status")
-                    if not isinstance(status, str):
-                        continue
-                    message = value.get("message")
-                    agents_states[key] = CollabAgentState(
-                        status=cast(CollabAgentStatus, status),
-                        message=message if isinstance(message, str) else None,
-                    )
-
-            prompt = data.get("prompt")
-            model = data.get("model")
-            reasoning_effort = data.get("reasoning_effort")
-            if not isinstance(reasoning_effort, str):
-                alt_reasoning_effort = data.get("reasoningEffort")
-                reasoning_effort = (
-                    alt_reasoning_effort
-                    if isinstance(alt_reasoning_effort, str)
-                    else None
-                )
-            if reasoning_effort not in _MODEL_REASONING_EFFORTS:
-                reasoning_effort = None
-            return CollabToolCallItem(
-                id=data["id"],
-                type="collab_tool_call",
-                tool=data["tool"],
-                sender_thread_id=data["sender_thread_id"],
-                receiver_thread_ids=receiver_thread_ids,
-                prompt=prompt if isinstance(prompt, str) else None,
-                model=model if isinstance(model, str) else None,
-                reasoning_effort=cast(Optional[ModelReasoningEffort], reasoning_effort),
-                agents_states=agents_states,
-                status=data["status"],
-            )
-        elif item_type == "web_search":
-            query = data.get("query", "")
-            if not isinstance(query, str):
-                query = ""
-            return WebSearchItem(
-                id=data["id"],
-                type="web_search",
-                query=query,
-                action=data.get("action"),
-            )
-        elif item_type == "todo_list":
-            items = [
-                TodoItem(text=item["text"], completed=item["completed"])
-                for item in data["items"]
-            ]
-            return TodoListItem(id=data["id"], type="todo_list", items=items)
-        elif item_type == "error":
-            return ErrorItem(id=data["id"], type="error", message=data["message"])
-        else:
-            raise CodexParseError(f"Unknown item type: {item_type}")
+        return parse_thread_item_payload(data)
 
     async def run(
         self, input: Input, turn_options: Optional[TurnOptions] = None

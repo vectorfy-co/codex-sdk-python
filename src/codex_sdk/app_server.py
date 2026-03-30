@@ -54,6 +54,8 @@ class AppServerOptions:
     client_info: Optional[AppServerClientInfo] = None
     # Enables experimental app-server methods/fields gated behind initialize.capabilities.
     experimental_api_enabled: bool = False
+    # Exact notification method names to suppress for this connection.
+    opt_out_notification_methods: Optional[Sequence[str]] = None
     auto_initialize: bool = True
     request_timeout: Optional[float] = None
 
@@ -426,8 +428,24 @@ class AppServerClient:
             client_info = self._default_client_info()
 
         params: Dict[str, Any] = {"clientInfo": client_info.as_dict()}
+        capabilities: Dict[str, Any] = {}
         if self._options.experimental_api_enabled:
-            params["capabilities"] = {"experimentalApi": True}
+            capabilities["experimentalApi"] = True
+        if self._options.opt_out_notification_methods:
+            reserved_methods = {"turn/completed", "turn/failed"}
+            reserved_opt_outs = sorted(
+                reserved_methods & set(self._options.opt_out_notification_methods)
+            )
+            if reserved_opt_outs:
+                raise CodexError(
+                    "opt_out_notification_methods cannot suppress required turn "
+                    f"lifecycle notifications: {reserved_opt_outs}"
+                )
+            capabilities["optOutNotificationMethods"] = list(
+                self._options.opt_out_notification_methods
+            )
+        if capabilities:
+            params["capabilities"] = capabilities
 
         result = await self._request_dict("initialize", params)
         await self.notify("initialized")
@@ -567,6 +585,8 @@ class AppServerClient:
         model_providers: Optional[Sequence[str]] = None,
         source_kinds: Optional[Sequence[str]] = None,
         archived: Optional[bool] = None,
+        cwd: Optional[Union[str, Path]] = None,
+        search_term: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Retrieve a page of threads from the app-server with optional filtering and sorting.
@@ -579,6 +599,8 @@ class AppServerClient:
             source_kinds: Filter threads by one or more source kinds.
             archived: If set, restrict results to archived (`True`) or unarchived (`False`)
                 threads.
+            cwd: Optional working directory filter.
+            search_term: Optional free-text search term.
 
         Returns:
             The raw response dictionary returned by the app-server for the `thread/list`
@@ -597,6 +619,10 @@ class AppServerClient:
             params["source_kinds"] = list(source_kinds)
         if archived is not None:
             params["archived"] = archived
+        if cwd is not None:
+            params["cwd"] = str(cwd)
+        if search_term is not None:
+            params["search_term"] = search_term
         return await self._request_dict("thread/list", _coerce_keys(params) or None)
 
     async def thread_read(
@@ -657,6 +683,21 @@ class AppServerClient:
             dict: The app-server's result payload for the compaction start request.
         """
         return await self._request_dict("thread/compact/start", {"threadId": thread_id})
+
+    async def thread_shell_command(
+        self, thread_id: str, *, command: str
+    ) -> Dict[str, Any]:
+        """Run a user-initiated `!` shell command against a thread."""
+        return await self._request_dict(
+            "thread/shellCommand",
+            {"threadId": thread_id, "command": command},
+        )
+
+    async def thread_background_terminals_clean(self, thread_id: str) -> Dict[str, Any]:
+        """Terminate all running background terminals for a thread."""
+        return await self._request_dict(
+            "thread/backgroundTerminals/clean", {"threadId": thread_id}
+        )
 
     async def thread_rollback(
         self, thread_id: str, *, num_turns: int
@@ -747,12 +788,14 @@ class AppServerClient:
         edits: Sequence[Mapping[str, Any]],
         file_path: Optional[str] = None,
         expected_version: Optional[str] = None,
+        reload_user_config: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Apply multiple configuration edits in a single app-server request."""
         params = {
             "edits": list(edits),
             "file_path": file_path,
             "expected_version": expected_version,
+            "reload_user_config": reload_user_config,
         }
         return await self._request_dict("config/batchWrite", _coerce_keys(params))
 
@@ -1039,18 +1082,32 @@ class AppServerClient:
             params["limit"] = limit
         return await self._request_dict("experimentalFeature/list", params or None)
 
+    async def experimental_feature_enablement_set(
+        self, *, feature_enablement: Mapping[str, bool]
+    ) -> Dict[str, Any]:
+        """Patch in-memory app-server feature enablement for supported feature keys."""
+        return await self._request_dict(
+            "experimentalFeature/enablement/set",
+            {"featureEnablement": dict(feature_enablement)},
+        )
+
     async def collaboration_mode_list(self) -> Dict[str, Any]:
         """List supported collaboration modes from the app-server."""
         return await self._request_dict("collaborationMode/list", {})
 
     async def plugin_list(
-        self, *, cwds: Optional[Sequence[Union[str, Path]]] = None
+        self,
+        *,
+        cwds: Optional[Sequence[Union[str, Path]]] = None,
+        force_remote_sync: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """List available plugin marketplaces and plugins."""
         params: Dict[str, Any] = {}
         if cwds is not None:
             params["cwds"] = [str(path) for path in cwds]
-        return await self._request_dict("plugin/list", params or None)
+        if force_remote_sync is not None:
+            params["force_remote_sync"] = force_remote_sync
+        return await self._request_dict("plugin/list", _coerce_keys(params) or None)
 
     async def plugin_install(
         self,
@@ -1146,6 +1203,14 @@ class AppServerClient:
         """Write a file via the experimental filesystem API."""
         params = {"path": str(path), "data_base64": data_base64}
         return await self._request_dict("fs/writeFile", _coerce_keys(params))
+
+    async def fs_watch(self, *, path: Union[str, Path]) -> Dict[str, Any]:
+        """Subscribe to filesystem change notifications for a path."""
+        return await self._request_dict("fs/watch", {"path": str(path)})
+
+    async def fs_unwatch(self, *, watch_id: str) -> Dict[str, Any]:
+        """Cancel a previous filesystem watch subscription."""
+        return await self._request_dict("fs/unwatch", {"watchId": watch_id})
 
     async def command_exec(
         self,
@@ -1274,9 +1339,17 @@ class AppServerClient:
             "externalAgentConfig/import", _coerce_keys(params)
         )
 
-    async def windows_sandbox_setup_start(self, *, mode: str) -> Dict[str, Any]:
+    async def windows_sandbox_setup_start(
+        self,
+        *,
+        mode: str,
+        cwd: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
         """Start Windows sandbox setup in the selected mode."""
-        return await self._request_dict("windowsSandbox/setupStart", {"mode": mode})
+        params: Dict[str, Any] = {"mode": mode}
+        if cwd is not None:
+            params["cwd"] = str(cwd)
+        return await self._request_dict("windowsSandbox/setupStart", params)
 
     async def account_login_start(self, *, params: Mapping[str, Any]) -> Dict[str, Any]:
         """Start an account login flow via the app-server."""

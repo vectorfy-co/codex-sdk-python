@@ -18,6 +18,7 @@ import asyncio
 
 from pydantic_ai import Agent
 
+from codex_sdk import ThreadHooks
 from codex_sdk.integrations.pydantic_ai_model import CodexModel
 from codex_sdk.options import ThreadOptions
 
@@ -28,7 +29,13 @@ async def main() -> None:
             model="gpt-5.4",
             sandbox_mode="read-only",
             skip_git_repo_check=True,
-        )
+        ),
+        hooks=ThreadHooks(
+            on_turn_started=lambda _event: print("[codex] streaming turn started"),
+            on_turn_completed=lambda event: print(
+                f"\n[codex] output tokens: {event.usage.output_tokens}"
+            ),
+        ),
     )
 
     agent = Agent(model, output_type=str)
