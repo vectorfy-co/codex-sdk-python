@@ -188,6 +188,36 @@ async def test_app_server_initialize_with_experimental_capabilities(
 
 
 @pytest.mark.asyncio
+async def test_app_server_initialize_rejects_required_lifecycle_opt_outs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = QueueStream()
+    process = FakeProcess(stdout)
+
+    async def fake_spawn(*_cmd: Any, **_kwargs: Any) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+
+    client = AppServerClient(
+        AppServerOptions(
+            auto_initialize=False,
+            opt_out_notification_methods=["turn/completed", "item/agentMessage/delta"],
+        )
+    )
+    await client.start()
+
+    with pytest.raises(
+        CodexError,
+        match="opt_out_notification_methods cannot suppress required turn lifecycle notifications",
+    ):
+        await client.initialize()
+
+    assert process.stdin.writes == []
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_app_server_initialize_starts_process_when_needed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

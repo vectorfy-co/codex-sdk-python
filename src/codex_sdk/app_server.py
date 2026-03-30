@@ -432,6 +432,15 @@ class AppServerClient:
         if self._options.experimental_api_enabled:
             capabilities["experimentalApi"] = True
         if self._options.opt_out_notification_methods:
+            reserved_methods = {"turn/completed", "turn/failed"}
+            reserved_opt_outs = sorted(
+                reserved_methods & set(self._options.opt_out_notification_methods)
+            )
+            if reserved_opt_outs:
+                raise CodexError(
+                    "opt_out_notification_methods cannot suppress required turn "
+                    f"lifecycle notifications: {reserved_opt_outs}"
+                )
             capabilities["optOutNotificationMethods"] = list(
                 self._options.opt_out_notification_methods
             )

@@ -45,13 +45,14 @@ from ..events import (
     TurnStartedEvent,
     Usage,
 )
-from ..exceptions import CodexError, TurnFailedError
+from ..exceptions import CodexError, CodexParseError, TurnFailedError
 from ..hooks import ThreadHooks, dispatch_event
 from ..items import (
     ThreadItem,
 )
 from ..options import CodexOptions, ModelReasoningEffort, ThreadOptions
 from ..telemetry import span
+from ..thread import parse_thread_item_payload
 
 try:
     from pydantic_ai.messages import (
@@ -596,8 +597,6 @@ def _normalize_notification_item_type(item_type: Any) -> Any:
 
 def _notification_item_to_thread_item(item: Mapping[str, Any]) -> Optional[ThreadItem]:
     """Convert an app-server item payload into a typed SDK ThreadItem."""
-    from ..thread import Thread
-
     normalized_item = dict(item)
     normalized_item["type"] = _normalize_notification_item_type(item.get("type"))
 
@@ -609,8 +608,8 @@ def _notification_item_to_thread_item(item: Mapping[str, Any]) -> Optional[Threa
         normalized_item["text"] = normalized_item["content"]
 
     try:
-        return Thread._parse_item(cast(Any, None), normalized_item)
-    except Exception:
+        return parse_thread_item_payload(normalized_item)
+    except (CodexParseError, KeyError, TypeError, ValueError):
         return None
 
 
@@ -1352,119 +1351,128 @@ class CodexModel(Model):
         """Execute one app-server turn and parse it into PydanticAI parts."""
         client = await self._ensure_client()
         session = await client.turn_session(thread_id, prompt)
-        state = _TurnAccumulationState()
-        hook_state = _HookDispatchState()
+        try:
+            state = _TurnAccumulationState()
+            hook_state = _HookDispatchState()
 
-        allow_stream_text = bool(
-            streamed is not None and model_request_parameters.allow_text_output
-        )
-        stream_raw_text = bool(
-            allow_stream_text
-            and not model_request_parameters.function_tools
-            and not model_request_parameters.output_tools
-        )
-
-        if hooks is not None:
-            hook_state.turn_started = True
-            await dispatch_event(hooks, TurnStartedEvent(type="turn.started"))
-
-        async for notification in session.notifications():
-            self._handle_notification(
-                notification=notification,
-                state=state,
-                streamed=streamed,
-                allow_stream_text=allow_stream_text,
-                stream_raw_text=stream_raw_text,
+            allow_stream_text = bool(
+                streamed is not None and model_request_parameters.allow_text_output
             )
-            await self._dispatch_notification_hooks(
-                notification=notification,
-                hooks=hooks,
-                hook_state=hook_state,
+            stream_raw_text = bool(
+                allow_stream_text
+                and not model_request_parameters.function_tools
+                and not model_request_parameters.output_tools
             )
 
-        final_turn = await session.wait()
-        if state.turn_failed_message:
-            raise TurnFailedError(state.turn_failed_message)
+            if hooks is not None:
+                hook_state.turn_started = True
+                await dispatch_event(hooks, TurnStartedEvent(type="turn.started"))
 
-        usage = state.usage or _extract_usage_from_turn(final_turn) or RequestUsage()
-        if hooks is not None and not hook_state.turn_completed:
-            hook_state.turn_completed = True
-            await dispatch_event(
-                hooks,
-                TurnCompletedEvent(
-                    type="turn.completed",
-                    usage=_request_usage_to_thread_usage(usage),
-                ),
-            )
-        final_text = _extract_turn_text(final_turn)
-        if not final_text:
-            final_text = state.latest_agent_text
-
-        parsed_json = _extract_envelope(final_text) if final_text else None
-        parsed_envelope = parsed_json if _is_envelope_candidate(parsed_json) else None
-
-        parts: List[Any] = []
-        tool_calls = _tool_calls_from_envelope(parsed_envelope)
-        if tool_calls:
-            for index, call in enumerate(tool_calls):
-                parts.append(
-                    ToolCallPart(
-                        tool_name=call.tool_name,
-                        args=call.arguments_json,
-                        tool_call_id=call.tool_call_id,
-                    )
+            async for notification in session.notifications():
+                self._handle_notification(
+                    notification=notification,
+                    state=state,
+                    streamed=streamed,
+                    allow_stream_text=allow_stream_text,
+                    stream_raw_text=stream_raw_text,
                 )
-                if streamed is not None:
-                    if call.tool_call_id in state.streamed_tool_call_ids:
-                        continue
-                    vendor_part_id = state.tool_call_vendor_part_ids.get(
-                        call.tool_call_id, index
-                    )
-                    streamed.push_tool_call(
-                        vendor_part_id=vendor_part_id,
-                        tool_name=call.tool_name,
-                        args=call.arguments_json,
-                        tool_call_id=call.tool_call_id,
-                    )
-            return parts, usage
+                await self._dispatch_notification_hooks(
+                    notification=notification,
+                    hooks=hooks,
+                    hook_state=hook_state,
+                )
 
-        if parsed_envelope is not None:
-            final_value = _final_from_envelope(parsed_envelope)
-        else:
-            final_value = final_text
+            final_turn = await session.wait()
+            if state.turn_failed_message:
+                raise TurnFailedError(state.turn_failed_message)
 
-        if model_request_parameters.allow_text_output and final_value:
-            parts.append(TextPart(final_value))
-            if streamed is not None:
-                if allow_stream_text:
-                    if not state.item_text_by_id:
-                        streamed.push_text_delta(vendor_part_id=0, content=final_value)
-                    else:
-                        last_item_id = (
-                            state.last_updated_item_id
-                            if state.last_updated_item_id in state.item_text_by_id
-                            else next(reversed(state.item_text_by_id))
+            usage = (
+                state.usage or _extract_usage_from_turn(final_turn) or RequestUsage()
+            )
+            if hooks is not None and not hook_state.turn_completed:
+                hook_state.turn_completed = True
+                await dispatch_event(
+                    hooks,
+                    TurnCompletedEvent(
+                        type="turn.completed",
+                        usage=_request_usage_to_thread_usage(usage),
+                    ),
+                )
+            final_text = _extract_turn_text(final_turn)
+            if not final_text:
+                final_text = state.latest_agent_text
+
+            parsed_json = _extract_envelope(final_text) if final_text else None
+            parsed_envelope = (
+                parsed_json if _is_envelope_candidate(parsed_json) else None
+            )
+
+            parts: List[Any] = []
+            tool_calls = _tool_calls_from_envelope(parsed_envelope)
+            if tool_calls:
+                for index, call in enumerate(tool_calls):
+                    parts.append(
+                        ToolCallPart(
+                            tool_name=call.tool_name,
+                            args=call.arguments_json,
+                            tool_call_id=call.tool_call_id,
                         )
-                        last_text = state.item_text_by_id[last_item_id]
-                        if final_value.startswith(last_text):
-                            remainder = final_value[len(last_text) :]
-                            if remainder:
-                                vendor_part_id = state.vendor_part_ids.get(
-                                    last_item_id, 0
-                                )
-                                streamed.push_text_delta(
-                                    vendor_part_id=vendor_part_id,
-                                    content=remainder,
-                                )
-                        elif final_value != last_text:
-                            streamed.push_text_delta(
-                                vendor_part_id=state.next_vendor_part_id,
-                                content=final_value,
-                            )
-                else:
-                    streamed.push_text_delta(vendor_part_id=0, content=final_value)
+                    )
+                    if streamed is not None:
+                        if call.tool_call_id in state.streamed_tool_call_ids:
+                            continue
+                        vendor_part_id = state.tool_call_vendor_part_ids.get(
+                            call.tool_call_id, index
+                        )
+                        streamed.push_tool_call(
+                            vendor_part_id=vendor_part_id,
+                            tool_name=call.tool_name,
+                            args=call.arguments_json,
+                            tool_call_id=call.tool_call_id,
+                        )
+                return parts, usage
 
-        return parts, usage
+            if parsed_envelope is not None:
+                final_value = _final_from_envelope(parsed_envelope)
+            else:
+                final_value = final_text
+
+            if model_request_parameters.allow_text_output and final_value:
+                parts.append(TextPart(final_value))
+                if streamed is not None:
+                    if allow_stream_text:
+                        if not state.item_text_by_id:
+                            streamed.push_text_delta(
+                                vendor_part_id=0, content=final_value
+                            )
+                        else:
+                            last_item_id = (
+                                state.last_updated_item_id
+                                if state.last_updated_item_id in state.item_text_by_id
+                                else next(reversed(state.item_text_by_id))
+                            )
+                            last_text = state.item_text_by_id[last_item_id]
+                            if final_value.startswith(last_text):
+                                remainder = final_value[len(last_text) :]
+                                if remainder:
+                                    vendor_part_id = state.vendor_part_ids.get(
+                                        last_item_id, 0
+                                    )
+                                    streamed.push_text_delta(
+                                        vendor_part_id=vendor_part_id,
+                                        content=remainder,
+                                    )
+                            elif final_value != last_text:
+                                streamed.push_text_delta(
+                                    vendor_part_id=state.next_vendor_part_id,
+                                    content=final_value,
+                                )
+                    else:
+                        streamed.push_text_delta(vendor_part_id=0, content=final_value)
+
+            return parts, usage
+        finally:
+            await session.close()
 
     async def _run_codex_request(
         self,
@@ -1580,10 +1588,11 @@ class CodexModel(Model):
                     )
                     streamed.finish(usage=usage, thread_id=thread_id, parts=parts)
                 except Exception as exc:  # pragma: no cover - defensive
+                    failed_thread_id = self._thread_id or thread_id
                     self._thread_id = None
                     self._active_thread_reasoning_effort = None
                     self._messages_seen = 0
-                    streamed.finish(thread_id=thread_id, error=exc)
+                    streamed.finish(thread_id=failed_thread_id, error=exc)
 
             task = asyncio.create_task(_runner())
             try:

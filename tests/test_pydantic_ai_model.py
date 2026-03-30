@@ -399,6 +399,16 @@ async def test_codex_model_dispatches_typed_hooks_for_camel_case_item_types():
     ]
 
 
+def test_notification_item_to_thread_item_returns_none_for_invalid_payload():
+    invalid_payload = {"id": "cmd-1", "type": "commandExecution"}
+
+    from codex_sdk.integrations.pydantic_ai_model import (
+        _notification_item_to_thread_item,
+    )
+
+    assert _notification_item_to_thread_item(invalid_payload) is None
+
+
 @pytest.mark.asyncio
 async def test_codex_model_dispatches_turn_failed_hook_before_raising():
     app = FakeAppServerClient(
@@ -428,6 +438,32 @@ async def test_codex_model_dispatches_turn_failed_hook_before_raising():
         )
 
     assert seen == ["thread.started", "turn.started", "turn.failed"]
+
+
+@pytest.mark.asyncio
+async def test_codex_model_closes_turn_session_when_hook_dispatch_fails():
+    def _raise_on_turn_started(_event):
+        raise RuntimeError("hook boom")
+
+    app = FakeAppServerClient(
+        notifications=[],
+        final_turn={
+            "id": "turn-hook-close",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+            "finalResponse": "hello",
+        },
+    )
+    model = CodexModel(
+        app_server=app,
+        hooks=ThreadHooks(on_turn_started=_raise_on_turn_started),
+    )
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+
+    with pytest.raises(RuntimeError, match="hook boom"):
+        await model.request([ModelRequest(parts=[UserPromptPart("hi")])], None, params)
+
+    assert app.last_turn_session is not None
+    assert app.last_turn_session.close_calls == 1
 
 
 @pytest.mark.asyncio
@@ -928,6 +964,40 @@ async def test_codex_model_request_stream_uses_prepared_request_parameters():
 
 
 @pytest.mark.asyncio
+async def test_codex_model_request_stream_preserves_thread_id_on_failure():
+    class FailingTurnSessionApp(FakeAppServerClient):
+        async def turn_session(self, thread_id, input, **params):
+            self.turn_session_calls.append(
+                {"thread_id": thread_id, "input": input, "params": dict(params)}
+            )
+            raise RuntimeError("stream boom")
+
+    app = FailingTurnSessionApp(
+        notifications=[],
+        final_turn={
+            "id": "turn-unused",
+            "usage": {"inputTokens": 1, "outputTokens": 0},
+            "finalResponse": "",
+        },
+        thread_id="thread-created",
+    )
+    model = CodexModel(app_server=app)
+    params = ModelRequestParameters(output_mode="text", allow_text_output=True)
+    streamed = None
+
+    with pytest.raises(RuntimeError, match="stream boom"):
+        async with model.request_stream(
+            [ModelRequest(parts=[UserPromptPart("fail")])], None, params
+        ) as current_streamed:
+            streamed = current_streamed
+            _ = [event async for event in current_streamed]
+
+    assert streamed is not None
+    assert streamed.provider_details == {"thread_id": "thread-created"}
+    assert streamed.get().provider_details == {"thread_id": "thread-created"}
+
+
+@pytest.mark.asyncio
 async def test_codex_model_request_stream_accepts_run_context_argument():
     app = FakeAppServerClient(
         notifications=[],
@@ -1101,6 +1171,7 @@ class FakeAppServerTurnSession:
     def __init__(self, notifications, final_turn):
         self._notifications = list(notifications)
         self._final_turn = dict(final_turn)
+        self.close_calls = 0
 
     async def notifications(self):
         for notification in self._notifications:
@@ -1108,6 +1179,9 @@ class FakeAppServerTurnSession:
 
     async def wait(self):
         return self._final_turn
+
+    async def close(self):
+        self.close_calls += 1
 
 
 class FakeAppServerClient:
@@ -1119,6 +1193,7 @@ class FakeAppServerClient:
         self.close_calls = 0
         self.thread_start_calls = []
         self.turn_session_calls = []
+        self.last_turn_session = None
 
     async def start(self):
         self.start_calls += 1
@@ -1134,7 +1209,10 @@ class FakeAppServerClient:
         self.turn_session_calls.append(
             {"thread_id": thread_id, "input": input, "params": dict(params)}
         )
-        return FakeAppServerTurnSession(self._notifications, self._final_turn)
+        self.last_turn_session = FakeAppServerTurnSession(
+            self._notifications, self._final_turn
+        )
+        return self.last_turn_session
 
 
 @pytest.mark.asyncio
