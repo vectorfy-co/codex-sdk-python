@@ -159,7 +159,14 @@ async def test_app_server_initialize_with_experimental_capabilities(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
 
     client = AppServerClient(
-        AppServerOptions(auto_initialize=False, experimental_api_enabled=True)
+        AppServerOptions(
+            auto_initialize=False,
+            experimental_api_enabled=True,
+            opt_out_notification_methods=[
+                "thread/started",
+                "item/agentMessage/delta",
+            ],
+        )
     )
     await client.start()
 
@@ -167,7 +174,13 @@ async def test_app_server_initialize_with_experimental_capabilities(
     await asyncio.sleep(0)
     init_request = json.loads(process.stdin.writes[-1].decode("utf-8"))
     assert init_request["method"] == "initialize"
-    assert init_request["params"]["capabilities"] == {"experimentalApi": True}
+    assert init_request["params"]["capabilities"] == {
+        "experimentalApi": True,
+        "optOutNotificationMethods": [
+            "thread/started",
+            "item/agentMessage/delta",
+        ],
+    }
 
     stdout.feed('{"id":1,"result":{"userAgent":"codex"}}')
     _ = await init_task
@@ -354,6 +367,8 @@ async def test_app_server_methods_and_input_normalization(
             model_providers=["openai"],
             source_kinds=["cli"],
             archived=True,
+            cwd=tmp_path,
+            search_term="bugfix",
         )
     )
     _, payload = await expect_request(
@@ -363,6 +378,8 @@ async def test_app_server_methods_and_input_normalization(
     assert payload["params"]["modelProviders"] == ["openai"]
     assert payload["params"]["sourceKinds"] == ["cli"]
     assert payload["params"]["archived"] is True
+    assert payload["params"]["cwd"] == str(tmp_path)
+    assert payload["params"]["searchTerm"] == "bugfix"
 
     # Cover thread_list with no filters (params should be omitted).
     task = asyncio.create_task(client.thread_list())
@@ -393,6 +410,19 @@ async def test_app_server_methods_and_input_normalization(
 
     task = asyncio.create_task(client.thread_compact_start("t1"))
     _, payload = await expect_request(task, "thread/compact/start", {})
+    assert payload["params"] == {"threadId": "t1"}
+
+    task = asyncio.create_task(
+        client.thread_shell_command("t1", command="git status --short")
+    )
+    _, payload = await expect_request(task, "thread/shellCommand", {})
+    assert payload["params"] == {
+        "threadId": "t1",
+        "command": "git status --short",
+    }
+
+    task = asyncio.create_task(client.thread_background_terminals_clean("t1"))
+    _, payload = await expect_request(task, "thread/backgroundTerminals/clean", {})
     assert payload["params"] == {"threadId": "t1"}
 
     task = asyncio.create_task(client.thread_rollback("t1", num_turns=2))
@@ -435,11 +465,13 @@ async def test_app_server_methods_and_input_normalization(
         client.config_batch_write(
             edits=[
                 {"keyPath": "analytics.enabled", "value": True, "mergeStrategy": "set"}
-            ]
+            ],
+            reload_user_config=True,
         )
     )
     _, payload = await expect_request(task, "config/batchWrite", {"ok": True})
     assert isinstance(payload["params"]["edits"], list)
+    assert payload["params"]["reloadUserConfig"] is True
 
     task = asyncio.create_task(client.skills_list(cwds=[tmp_path], force_reload=True))
     _, payload = await expect_request(task, "skills/list", {"data": []})
@@ -579,13 +611,28 @@ async def test_app_server_methods_and_input_normalization(
     _, payload = await expect_request(task, "experimentalFeature/list", {"data": []})
     assert payload["params"] == {"limit": 5, "cursor": "e"}
 
+    task = asyncio.create_task(
+        client.experimental_feature_enablement_set(
+            feature_enablement={"apps": True, "plugins": False}
+        )
+    )
+    _, payload = await expect_request(
+        task, "experimentalFeature/enablement/set", {"ok": True}
+    )
+    assert payload["params"] == {"featureEnablement": {"apps": True, "plugins": False}}
+
     task = asyncio.create_task(client.collaboration_mode_list())
     _, payload = await expect_request(task, "collaborationMode/list", {"data": []})
     assert payload["params"] == {}
 
-    task = asyncio.create_task(client.plugin_list(cwds=[tmp_path]))
+    task = asyncio.create_task(
+        client.plugin_list(cwds=[tmp_path], force_remote_sync=True)
+    )
     _, payload = await expect_request(task, "plugin/list", {"marketplaces": []})
-    assert payload["params"] == {"cwds": [str(tmp_path)]}
+    assert payload["params"] == {
+        "cwds": [str(tmp_path)],
+        "forceRemoteSync": True,
+    }
 
     task = asyncio.create_task(
         client.plugin_install(
@@ -702,6 +749,16 @@ async def test_app_server_methods_and_input_normalization(
         "path": str(tmp_path / "source.txt"),
         "dataBase64": "aGk=",
     }
+
+    task = asyncio.create_task(client.fs_watch(path=tmp_path))
+    _, payload = await expect_request(
+        task, "fs/watch", {"watchId": "watch_1", "path": str(tmp_path)}
+    )
+    assert payload["params"] == {"path": str(tmp_path)}
+
+    task = asyncio.create_task(client.fs_unwatch(watch_id="watch_1"))
+    _, payload = await expect_request(task, "fs/unwatch", {})
+    assert payload["params"] == {"watchId": "watch_1"}
 
     task = asyncio.create_task(
         client.command_exec(
@@ -829,11 +886,13 @@ async def test_app_server_methods_and_input_normalization(
         ]
     }
 
-    task = asyncio.create_task(client.windows_sandbox_setup_start(mode="elevated"))
+    task = asyncio.create_task(
+        client.windows_sandbox_setup_start(mode="elevated", cwd=tmp_path)
+    )
     _, payload = await expect_request(
         task, "windowsSandbox/setupStart", {"status": "started"}
     )
-    assert payload["params"] == {"mode": "elevated"}
+    assert payload["params"] == {"mode": "elevated", "cwd": str(tmp_path)}
 
     task = asyncio.create_task(
         client.account_login_start(params={"type": "apiKey", "apiKey": "key"})

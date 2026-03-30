@@ -2,6 +2,39 @@
 
 This file tracks SDK-level changes. Keep the newest changes at the top.
 
+## [0.117.0] - 2026-03-28
+
+### Added
+- App-server helpers for newly exposed upstream RPCs:
+  `thread_shell_command`, `thread_background_terminals_clean`,
+  `experimental_feature_enablement_set`, `fs_watch`, and `fs_unwatch`.
+- `CodexModel(..., hooks=ThreadHooks(...))` now dispatches typed SDK thread hooks for
+  app-server-backed PydanticAI requests, including thread start, turn start/completion,
+  turn failure, and item lifecycle events.
+
+### Updated
+- `AppServerOptions` now supports `opt_out_notification_methods`, wiring
+  `initialize.capabilities.optOutNotificationMethods` for app-server clients that
+  want to suppress selected notification streams.
+- The PydanticAI model-provider path now runs through upstream
+  `Model.prepare_request()`, keeping request customization, output-mode handling,
+  builtin-tool validation, and thinking resolution aligned with PydanticAI `1.73.0`.
+- `CodexModel` now maps PydanticAI `model_settings["thinking"]` onto Codex
+  `model_reasoning_effort` when no explicit thread-level reasoning effort is set.
+- PydanticAI dependency support updated to `>=1.73.0,<2`, with the dev dependency
+  pinned to `1.73.0` for reproducible test coverage against the latest release.
+- `thread_list` now supports the upstream `cwd` and `search_term` filters.
+- `plugin_list` now supports `force_remote_sync`, `config_batch_write` now supports
+  `reload_user_config`, and `windows_sandbox_setup_start` now accepts an optional
+  workspace `cwd`.
+- README and PydanticAI examples updated to show typed output models, runtime hooks,
+  and per-run thinking configuration.
+
+### Notes
+- Codex 0.116.0 and 0.117.0 introduced app-server support for thread-scoped `!`
+  shell commands, filesystem watch subscriptions, richer plugin sync flows, and
+  per-connection notification suppression.
+
 ## [0.115.1] - 2026-03-17
 
 ### Updated

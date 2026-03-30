@@ -20,11 +20,37 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    AsyncIterator,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    cast,
+)
 
 from ..app_server import AppServerClient, AppServerNotification, AppServerOptions
+from ..events import (
+    ItemCompletedEvent,
+    ItemStartedEvent,
+    ItemUpdatedEvent,
+    ThreadError,
+    ThreadErrorEvent,
+    ThreadStartedEvent,
+    TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStartedEvent,
+    Usage,
+)
 from ..exceptions import CodexError, TurnFailedError
-from ..options import CodexOptions, ThreadOptions
+from ..hooks import ThreadHooks, dispatch_event
+from ..items import (
+    ThreadItem,
+)
+from ..options import CodexOptions, ModelReasoningEffort, ThreadOptions
 from ..telemetry import span
 
 try:
@@ -91,6 +117,15 @@ class _TurnAccumulationState:
     next_vendor_part_id: int = 0
     usage: Optional[RequestUsage] = None
     turn_failed_message: Optional[str] = None
+
+
+@dataclass
+class _HookDispatchState:
+    """Tracks which synthetic thread events were already dispatched for one turn."""
+
+    turn_started: bool = False
+    turn_completed: bool = False
+    turn_failed: bool = False
 
 
 def _jsonable(value: Any) -> Any:
@@ -522,6 +557,63 @@ def _extract_turn_failure_message(notification: AppServerNotification) -> Option
     return "Turn failed"
 
 
+def _request_usage_to_thread_usage(usage: RequestUsage) -> Usage:
+    """Convert PydanticAI usage into the SDK's thread-usage shape."""
+    return Usage(
+        input_tokens=getattr(usage, "input_tokens", 0),
+        cached_input_tokens=getattr(usage, "cache_read_tokens", 0),
+        output_tokens=getattr(usage, "output_tokens", 0),
+    )
+
+
+def _thread_reasoning_effort_from_thinking(
+    thinking: Any,
+) -> Optional[ModelReasoningEffort]:
+    """Map PydanticAI's unified thinking setting onto Codex reasoning effort."""
+    if thinking is True:
+        return None
+    if thinking is False:
+        return "none"
+    if thinking in {"minimal", "low", "medium", "high", "xhigh"}:
+        return cast(ModelReasoningEffort, thinking)
+    return None
+
+
+def _normalize_notification_item_type(item_type: Any) -> Any:
+    """Normalize best-effort item type aliases from app-server payloads."""
+    if not isinstance(item_type, str):
+        return item_type
+    if "_" in item_type:
+        return item_type
+
+    normalized: List[str] = []
+    for index, char in enumerate(item_type):
+        if char.isupper() and index > 0:
+            normalized.append("_")
+        normalized.append(char.lower())
+    return "".join(normalized)
+
+
+def _notification_item_to_thread_item(item: Mapping[str, Any]) -> Optional[ThreadItem]:
+    """Convert an app-server item payload into a typed SDK ThreadItem."""
+    from ..thread import Thread
+
+    normalized_item = dict(item)
+    normalized_item["type"] = _normalize_notification_item_type(item.get("type"))
+
+    if (
+        normalized_item.get("type") == "agent_message"
+        and "text" not in normalized_item
+        and isinstance(normalized_item.get("content"), str)
+    ):
+        normalized_item["text"] = normalized_item["content"]
+
+    try:
+        return Thread._parse_item(cast(Any, None), normalized_item)
+    except Exception:
+        return None
+
+
 class CodexStreamedResponse(StreamedResponse):
     """Incremental streamed response wrapper for app-server-backed CodexModel."""
 
@@ -738,6 +830,7 @@ class CodexModel(Model):
         system: str = "openai",
         performance_profile: str = "balanced",
         thread_reuse_mode: str = "run",
+        hooks: Optional[ThreadHooks] = None,
     ) -> None:
         """Create an app-server-backed Codex model provider.
 
@@ -759,12 +852,13 @@ class CodexModel(Model):
         self._thread_options = self._prepare_thread_options(thread_options)
 
         if profile is None:
-            profile = ModelProfile(supports_tools=True)
+            profile = ModelProfile(supports_tools=True, supports_thinking=True)
         super().__init__(settings=settings, profile=profile)
 
         self._system = system
         self._request_lock = asyncio.Lock()
         self._closed = False
+        self._hooks = hooks
 
         self._app_client = app_server
         self._owns_app_client = app_server is None
@@ -776,6 +870,7 @@ class CodexModel(Model):
         )
 
         self._thread_id: Optional[str] = None
+        self._active_thread_reasoning_effort: Optional[ModelReasoningEffort] = None
         self._messages_seen = 0
 
     @property
@@ -794,7 +889,40 @@ class CodexModel(Model):
         model_request_parameters: ModelRequestParameters,
     ) -> tuple[Optional[ModelSettings], ModelRequestParameters]:
         """Hook to customize request settings/parameters before execution."""
-        return model_settings, model_request_parameters
+        prepared = super().prepare_request(model_settings, model_request_parameters)
+        return cast(
+            tuple[Optional[ModelSettings], ModelRequestParameters],
+            prepared,
+        )
+
+    def resolve_hooks(
+        self,
+        model_settings: Optional[ModelSettings],
+        model_request_parameters: ModelRequestParameters,
+    ) -> Optional[ThreadHooks]:
+        """Resolve typed SDK thread hooks for the current PydanticAI request."""
+        del model_settings, model_request_parameters
+        return self._hooks
+
+    def _prepare_request_context(
+        self,
+        model_settings: Optional[ModelSettings],
+        model_request_parameters: ModelRequestParameters,
+    ) -> tuple[
+        Optional[ModelSettings],
+        ModelRequestParameters,
+        Optional[ThreadHooks],
+        ThreadOptions,
+    ]:
+        """Resolve prepared request inputs shared by request and request_stream."""
+        model_settings, model_request_parameters = self.prepare_request(
+            model_settings, model_request_parameters
+        )
+        hooks = self.resolve_hooks(model_settings, model_request_parameters)
+        resolved_thread_options = self._resolved_thread_options(
+            model_request_parameters
+        )
+        return model_settings, model_request_parameters, hooks, resolved_thread_options
 
     async def close(self) -> None:
         """Close owned app-server resources and reset cached thread state."""
@@ -806,6 +934,7 @@ class CodexModel(Model):
             finally:
                 self._app_client = None
                 self._thread_id = None
+                self._active_thread_reasoning_effort = None
                 self._messages_seen = 0
 
     async def _ensure_client(self) -> AppServerClient:
@@ -874,10 +1003,30 @@ class CodexModel(Model):
             config_overrides=codex_options.config_overrides,
         )
 
-    def _thread_start_params(self) -> Dict[str, Any]:
+    def _resolved_thread_options(
+        self, model_request_parameters: ModelRequestParameters
+    ) -> ThreadOptions:
+        """Resolve per-request thread options without mutating model defaults."""
+        if self._thread_options.model_reasoning_effort is not None:
+            return self._thread_options
+
+        reasoning_effort = _thread_reasoning_effort_from_thinking(
+            model_request_parameters.thinking
+        )
+        if reasoning_effort is None:
+            return self._thread_options
+
+        return replace(
+            self._thread_options,
+            model_reasoning_effort=reasoning_effort,
+        )
+
+    def _thread_start_params(
+        self, thread_options: Optional[ThreadOptions] = None
+    ) -> Dict[str, Any]:
         """Build app-server `thread/start` params from current thread options."""
         params: Dict[str, Any] = {}
-        options = self._thread_options
+        options = thread_options or self._thread_options
 
         if options.model is not None:
             params["model"] = options.model
@@ -940,28 +1089,46 @@ class CodexModel(Model):
 
         return params
 
-    async def _ensure_thread(self, messages: Sequence[ModelMessage]) -> str:
+    async def _ensure_thread(
+        self,
+        messages: Sequence[ModelMessage],
+        hooks: Optional[ThreadHooks] = None,
+        thread_options: Optional[ThreadOptions] = None,
+    ) -> str:
         """Ensure a reusable Codex thread exists for the current message stream."""
+        resolved_thread_options = thread_options or self._thread_options
+        requested_reasoning_effort = resolved_thread_options.model_reasoning_effort
         history_len = len(messages)
         if self._thread_id is not None:
             should_reset = history_len < self._messages_seen
             if self._thread_reuse_mode == "run" and history_len <= self._messages_seen:
                 should_reset = True
+            if requested_reasoning_effort != self._active_thread_reasoning_effort:
+                should_reset = True
             if should_reset:
                 self._thread_id = None
+                self._active_thread_reasoning_effort = None
                 self._messages_seen = 0
 
         if self._thread_id:
             return self._thread_id
 
         client = await self._ensure_client()
-        response = await client.thread_start(**self._thread_start_params())
+        response = await client.thread_start(
+            **self._thread_start_params(resolved_thread_options)
+        )
         thread = response.get("thread") if isinstance(response, dict) else None
         thread_id = thread.get("id") if isinstance(thread, Mapping) else None
         if not isinstance(thread_id, str) or not thread_id:
             raise CodexError("thread/start response missing thread id")
         self._thread_id = thread_id
+        self._active_thread_reasoning_effort = requested_reasoning_effort
         self._messages_seen = 0
+        if hooks is not None:
+            await dispatch_event(
+                hooks,
+                ThreadStartedEvent(type="thread.started", thread_id=thread_id),
+            )
         return thread_id
 
     def _slice_incremental_messages(
@@ -1014,6 +1181,14 @@ class CodexModel(Model):
                 "- Text output is NOT allowed; to finish, call exactly one output tool and keep final empty."
             )
 
+        prompted_output_instructions = (
+            model_request_parameters.prompted_output_instructions
+        )
+        if prompted_output_instructions:
+            prompt_sections.extend(
+                ["", "Structured output instructions:", prompted_output_instructions]
+            )
+
         if tool_manifest:
             prompt_sections.extend(["", tool_manifest])
 
@@ -1022,6 +1197,62 @@ class CodexModel(Model):
             prompt_sections.extend(["", "Conversation so far:", history])
 
         return "\n".join(prompt_sections).strip()
+
+    async def _dispatch_notification_hooks(
+        self,
+        *,
+        notification: AppServerNotification,
+        hooks: Optional[ThreadHooks],
+        hook_state: _HookDispatchState,
+    ) -> None:
+        """Map app-server notifications onto typed SDK thread hooks."""
+        if hooks is None:
+            return
+
+        if notification.method == "turn/failed":
+            if hook_state.turn_failed:
+                return
+            message = _extract_turn_failure_message(notification) or "Turn failed"
+            hook_state.turn_failed = True
+            await dispatch_event(
+                hooks,
+                TurnFailedEvent(
+                    type="turn.failed",
+                    error=ThreadError(message=message),
+                ),
+            )
+            return
+
+        if notification.method == "error":
+            params = notification.params
+            message = "Unknown error"
+            if isinstance(params, Mapping):
+                raw_message = params.get("message")
+                if isinstance(raw_message, str) and raw_message:
+                    message = raw_message
+            await dispatch_event(hooks, ThreadErrorEvent(type="error", message=message))
+            return
+
+        event_type_map = {
+            "item/started": ItemStartedEvent,
+            "item/updated": ItemUpdatedEvent,
+            "item/completed": ItemCompletedEvent,
+        }
+        event_cls = event_type_map.get(notification.method)
+        if event_cls is None:
+            return
+
+        for raw_item in _notification_items(notification):
+            item = _notification_item_to_thread_item(raw_item)
+            if item is None:
+                continue
+            await dispatch_event(
+                hooks,
+                event_cls(
+                    type=notification.method.replace("/", "."),
+                    item=item,
+                ),
+            )
 
     def _handle_notification(
         self,
@@ -1116,11 +1347,13 @@ class CodexModel(Model):
         prompt: str,
         model_request_parameters: ModelRequestParameters,
         streamed: Optional[CodexStreamedResponse] = None,
+        hooks: Optional[ThreadHooks] = None,
     ) -> tuple[List[Any], RequestUsage]:
         """Execute one app-server turn and parse it into PydanticAI parts."""
         client = await self._ensure_client()
         session = await client.turn_session(thread_id, prompt)
         state = _TurnAccumulationState()
+        hook_state = _HookDispatchState()
 
         allow_stream_text = bool(
             streamed is not None and model_request_parameters.allow_text_output
@@ -1131,6 +1364,10 @@ class CodexModel(Model):
             and not model_request_parameters.output_tools
         )
 
+        if hooks is not None:
+            hook_state.turn_started = True
+            await dispatch_event(hooks, TurnStartedEvent(type="turn.started"))
+
         async for notification in session.notifications():
             self._handle_notification(
                 notification=notification,
@@ -1139,12 +1376,26 @@ class CodexModel(Model):
                 allow_stream_text=allow_stream_text,
                 stream_raw_text=stream_raw_text,
             )
+            await self._dispatch_notification_hooks(
+                notification=notification,
+                hooks=hooks,
+                hook_state=hook_state,
+            )
 
         final_turn = await session.wait()
         if state.turn_failed_message:
             raise TurnFailedError(state.turn_failed_message)
 
         usage = state.usage or _extract_usage_from_turn(final_turn) or RequestUsage()
+        if hooks is not None and not hook_state.turn_completed:
+            hook_state.turn_completed = True
+            await dispatch_event(
+                hooks,
+                TurnCompletedEvent(
+                    type="turn.completed",
+                    usage=_request_usage_to_thread_usage(usage),
+                ),
+            )
         final_text = _extract_turn_text(final_turn)
         if not final_text:
             final_text = state.latest_agent_text
@@ -1218,17 +1469,17 @@ class CodexModel(Model):
     async def _run_codex_request(
         self,
         messages: list[ModelMessage],
-        model_settings: Optional[ModelSettings],
         model_request_parameters: ModelRequestParameters,
+        hooks: Optional[ThreadHooks],
+        resolved_thread_options: ThreadOptions,
         streamed: Optional[CodexStreamedResponse] = None,
-    ) -> tuple[List[Any], RequestUsage, str, ModelRequestParameters]:
+    ) -> tuple[List[Any], RequestUsage, str]:
         """Run one model request via app-server transport."""
-        model_settings, model_request_parameters = self.prepare_request(
-            model_settings, model_request_parameters
+        thread_id = await self._ensure_thread(
+            messages,
+            hooks=hooks,
+            thread_options=resolved_thread_options,
         )
-        del model_settings
-
-        thread_id = await self._ensure_thread(messages)
         incremental_messages, seen_after = self._slice_incremental_messages(messages)
         prompt = self._build_prompt(
             messages=incremental_messages,
@@ -1237,8 +1488,8 @@ class CodexModel(Model):
 
         with span(
             "codex_sdk.pydantic_ai.model_request",
-            model=self._thread_options.model,
-            sandbox_mode=self._thread_options.sandbox_mode,
+            model=resolved_thread_options.model,
+            sandbox_mode=resolved_thread_options.sandbox_mode,
             transport="app_server",
             performance_profile=self._performance_profile,
         ):
@@ -1247,10 +1498,11 @@ class CodexModel(Model):
                 prompt=prompt,
                 model_request_parameters=model_request_parameters,
                 streamed=streamed,
+                hooks=hooks,
             )
 
         self._messages_seen = seen_after
-        return parts, usage, thread_id, model_request_parameters
+        return parts, usage, thread_id
 
     async def request(
         self,
@@ -1261,13 +1513,24 @@ class CodexModel(Model):
         """Run a request and return a completed model response."""
         async with self._request_lock:
             try:
-                parts, usage, thread_id, _ = await self._run_codex_request(
+                (
+                    _,
+                    model_request_parameters,
+                    hooks,
+                    resolved_thread_options,
+                ) = self._prepare_request_context(
+                    model_settings,
+                    model_request_parameters,
+                )
+                parts, usage, thread_id = await self._run_codex_request(
                     messages=messages,
-                    model_settings=model_settings,
                     model_request_parameters=model_request_parameters,
+                    hooks=hooks,
+                    resolved_thread_options=resolved_thread_options,
                 )
             except Exception:
                 self._thread_id = None
+                self._active_thread_reasoning_effort = None
                 self._messages_seen = 0
                 raise
 
@@ -1290,6 +1553,15 @@ class CodexModel(Model):
         """Run a request and stream incremental response events."""
         del run_context
         async with self._request_lock:
+            (
+                _,
+                model_request_parameters,
+                hooks,
+                resolved_thread_options,
+            ) = self._prepare_request_context(
+                model_settings,
+                model_request_parameters,
+            )
             streamed = CodexStreamedResponse(
                 model_request_parameters=model_request_parameters,
                 model_name=self.model_name,
@@ -1299,15 +1571,17 @@ class CodexModel(Model):
             async def _runner() -> None:
                 thread_id: Optional[str] = self._thread_id
                 try:
-                    parts, usage, thread_id, _ = await self._run_codex_request(
+                    parts, usage, thread_id = await self._run_codex_request(
                         messages=messages,
-                        model_settings=model_settings,
                         model_request_parameters=model_request_parameters,
+                        hooks=hooks,
+                        resolved_thread_options=resolved_thread_options,
                         streamed=streamed,
                     )
                     streamed.finish(usage=usage, thread_id=thread_id, parts=parts)
                 except Exception as exc:  # pragma: no cover - defensive
                     self._thread_id = None
+                    self._active_thread_reasoning_effort = None
                     self._messages_seen = 0
                     streamed.finish(thread_id=thread_id, error=exc)
 
