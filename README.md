@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This project is discontinued and no longer maintained.
+
 # ![Codex SDK Python](https://img.shields.io/badge/Codex%20SDK-Python-1D4ED8?style=for-the-badge&logo=python&logoColor=white)
 
 Embed the Codex agent in Python workflows. This SDK supports both the `codex exec`
